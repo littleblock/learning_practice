@@ -1,7 +1,11 @@
 import { Job, JobStatus, JobType, Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db/client";
+import { logger } from "@/server/logger";
 import { resolveRetryStatus } from "@/server/queue/retry";
+
+const staleJobLockTimeoutMs = 15 * 60_000;
+export const jobLockHeartbeatIntervalMs = 30_000;
 
 export async function enqueueJob<TPayload extends Prisma.JsonObject>(
   type: JobType,
@@ -13,6 +17,25 @@ export async function enqueueJob<TPayload extends Prisma.JsonObject>(
       type,
       payload,
       maxAttempts,
+    },
+  });
+}
+
+export async function recoverStaleProcessingJobs() {
+  return prisma.job.updateMany({
+    where: {
+      status: JobStatus.PROCESSING,
+      lockedAt: {
+        lt: new Date(Date.now() - staleJobLockTimeoutMs),
+      },
+    },
+    data: {
+      status: JobStatus.PENDING,
+      availableAt: new Date(),
+      finishedAt: null,
+      lockedAt: null,
+      lockedBy: null,
+      lastError: "任务执行超时，已自动重新排队",
     },
   });
 }
@@ -43,6 +66,19 @@ export async function claimNextPendingJob(workerId: string) {
   return rows[0] ?? null;
 }
 
+export async function touchJobLock(jobId: string, workerId: string) {
+  return prisma.job.updateMany({
+    where: {
+      id: jobId,
+      status: JobStatus.PROCESSING,
+      lockedBy: workerId,
+    },
+    data: {
+      lockedAt: new Date(),
+    },
+  });
+}
+
 export async function markJobCompleted(jobId: string) {
   return prisma.job.update({
     where: { id: jobId },
@@ -56,9 +92,19 @@ export async function markJobCompleted(jobId: string) {
   });
 }
 
-export async function releaseJobFailure(job: Pick<Job, "id" | "attempts" | "maxAttempts">, error: string) {
+export async function releaseJobFailure(
+  job: Pick<Job, "id" | "attempts" | "maxAttempts">,
+  error: string,
+) {
   const nextStatus = resolveRetryStatus(job.attempts, job.maxAttempts);
   const reachedMaxAttempts = nextStatus === JobStatus.FAILED;
+
+  if (error.length > 4000) {
+    logger.error(
+      { jobId: job.id, fullError: error },
+      "Job error truncated for storage",
+    );
+  }
 
   return prisma.job.update({
     where: { id: job.id },

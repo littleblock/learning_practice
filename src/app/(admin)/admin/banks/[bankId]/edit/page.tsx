@@ -25,11 +25,7 @@ export default async function AdminBankEditPage({
   });
 
   return (
-    <AdminShell
-      activeKey="banks"
-      userName={session.user.displayName}
-      bankId={bankId}
-    >
+    <AdminShell activeKey="banks" userName={session.user.displayName}>
       <section className="admin-panel" style={{ padding: 24 }}>
         {!bank ? (
           <div className="mobile-page-header">

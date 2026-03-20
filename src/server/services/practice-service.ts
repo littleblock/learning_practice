@@ -4,6 +4,7 @@ import {
   PracticeSourceType,
   Prisma,
 } from "@prisma/client";
+import { z } from "zod";
 
 import { MATCH_SCORE_THRESHOLD, WRONG_BOOK_RECOVERY_COUNT } from "@/shared/constants/app";
 import {
@@ -24,7 +25,8 @@ function parseQuestionOptions(value: Prisma.JsonValue) {
 }
 
 function parseCorrectAnswers(value: Prisma.JsonValue) {
-  return (value as Prisma.JsonArray).map((item) => String(item));
+  const parsed = z.array(z.string()).parse(value);
+  return parsed;
 }
 
 function shuffle<T>(items: T[]) {
@@ -62,7 +64,7 @@ function buildPracticeSessionView(
         stem: currentItem.question.stem,
         options: parseQuestionOptions(currentItem.question.options),
         selectedAnswers: latestAttempt
-          ? ((latestAttempt.selectedAnswers as Prisma.JsonArray).map((item) => String(item)) as string[])
+          ? z.array(z.string()).parse(latestAttempt.selectedAnswers)
           : [],
         correctAnswers: parseCorrectAnswers(currentItem.question.correctAnswers),
         analysis: currentItem.question.analysis,

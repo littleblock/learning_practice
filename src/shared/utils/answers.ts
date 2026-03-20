@@ -1,7 +1,9 @@
 import { QuestionType } from "@prisma/client";
 
 export function normalizeAnswerValues(values: string[]) {
-  return [...new Set(values.map((item) => item.trim().toUpperCase()).filter(Boolean))].sort();
+  return [
+    ...new Set(values.map((item) => item.trim().toUpperCase()).filter(Boolean)),
+  ].sort();
 }
 
 export function isAnswerCorrect(
@@ -13,7 +15,10 @@ export function isAnswerCorrect(
   const correct = normalizeAnswerValues(correctAnswers);
 
   if (type === QuestionType.MULTIPLE) {
-    return selected.length === correct.length && selected.every((item, index) => item === correct[index]);
+    return (
+      selected.length === correct.length &&
+      selected.every((item, index) => item === correct[index])
+    );
   }
 
   return selected[0] === correct[0];

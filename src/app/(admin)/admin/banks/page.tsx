@@ -35,7 +35,7 @@ export default async function AdminBanksPage({
         <BankFilters keyword={keyword} status={status} />
 
         <p className="page-note" style={{ marginTop: 14 }}>
-          当前共匹配到 {result.total} 个题库
+          当前共匹配到 {result.total} 个题库。
         </p>
 
         <AdminPagination
@@ -47,7 +47,9 @@ export default async function AdminBanksPage({
         />
 
         {result.items.length === 0 ? (
-          <section className="admin-empty-state">当前筛选条件下没有题库结果。</section>
+          <section className="admin-empty-state">
+            当前筛选条件下没有题库结果。
+          </section>
         ) : (
           <BankListTable
             banks={result.items.map((bank) => ({

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
-import { ZodError } from "zod";
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 
 import { logger } from "@/server/logger";
 import { captureServerException } from "@/server/monitoring/sentry";
@@ -10,7 +10,11 @@ export function getRequestId(request: Request) {
   return request.headers.get("x-request-id") || crypto.randomUUID();
 }
 
-export function jsonWithRequestId(payload: unknown, requestId: string, init?: ResponseInit) {
+export function jsonWithRequestId(
+  payload: unknown,
+  requestId: string,
+  init?: ResponseInit,
+) {
   const response = NextResponse.json(payload, init);
   response.headers.set("x-request-id", requestId);
   return response;

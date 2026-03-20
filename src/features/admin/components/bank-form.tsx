@@ -2,7 +2,7 @@
 
 import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 interface BankFormProps {
   mode: "create" | "edit";
@@ -35,67 +35,70 @@ export function BankForm({
   const [sortOrder, setSortOrder] = useState(initialValues?.sortOrder ?? 0);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage("");
     setSuccessMessage("");
+    setIsSubmitting(true);
 
-    const response = await fetch(
-      mode === "create" ? "/api/admin/banks" : `/api/admin/banks/${bankId}`,
-      {
-        method: mode === "create" ? "POST" : "PATCH",
-        headers: {
-          "Content-Type": "application/json",
+    try {
+      const response = await fetch(
+        mode === "create" ? "/api/admin/banks" : `/api/admin/banks/${bankId}`,
+        {
+          method: mode === "create" ? "POST" : "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            mode === "create"
+              ? {
+                  name,
+                  description,
+                }
+              : {
+                  name,
+                  description,
+                  sortOrder,
+                },
+          ),
         },
-        body: JSON.stringify(
-          mode === "create"
-            ? {
-                name,
-                description,
-              }
-            : {
-                name,
-                description,
-                sortOrder,
-              },
-        ),
-      },
-    );
-
-    const payload = (await response.json()) as {
-      code?: string;
-      message?: string;
-    };
-
-    if (!response.ok) {
-      setErrorMessage(
-        payload.message ??
-          (mode === "create" ? "创建题库失败" : "更新题库失败"),
       );
-      return;
-    }
 
-    if (mode === "create" && !redirectTo) {
-      setCode(payload.code ?? "");
-      setName("");
-      setDescription("");
-      setSortOrder(0);
-      setSuccessMessage(
-        payload.code ? `题库已创建，编码为 ${payload.code}` : "题库已创建",
-      );
-    } else {
-      setSuccessMessage(mode === "create" ? "题库已创建" : "题库信息已更新");
-    }
+      const payload = (await response.json()) as {
+        code?: string;
+        message?: string;
+      };
 
-    onSuccess?.();
-    startTransition(() => {
+      if (!response.ok) {
+        setErrorMessage(
+          payload.message ??
+            (mode === "create" ? "创建题库失败" : "更新题库失败"),
+        );
+        return;
+      }
+
+      if (mode === "create" && !redirectTo) {
+        setCode(payload.code ?? "");
+        setName("");
+        setDescription("");
+        setSortOrder(0);
+        setSuccessMessage(
+          payload.code ? `题库已创建，编码为 ${payload.code}` : "题库已创建",
+        );
+      } else {
+        setSuccessMessage(mode === "create" ? "题库已创建" : "题库信息已更新");
+      }
+
+      onSuccess?.();
       if (redirectTo) {
         router.replace(redirectTo);
       }
       router.refresh();
-    });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -137,8 +140,8 @@ export function BankForm({
       <Button
         type="primary"
         htmlType="submit"
-        loading={isPending}
-        disabled={!name}
+        loading={isSubmitting}
+        disabled={!name || isSubmitting}
       >
         {submitText ?? (mode === "create" ? "创建题库" : "保存修改")}
       </Button>

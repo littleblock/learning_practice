@@ -1,4 +1,5 @@
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
 
 import { AdminPagination } from "@/features/admin/components/admin-pagination";
 import { AdminShell } from "@/features/admin/components/admin-shell";
@@ -23,6 +24,7 @@ export default async function AdminStatutesPage({
     select: {
       id: true,
       name: true,
+      code: true,
     },
   });
 
@@ -33,12 +35,29 @@ export default async function AdminStatutesPage({
   const documents = await listStatuteDocuments(bank.id, query);
 
   return (
-    <AdminShell activeKey="statutes" userName={session.user.displayName} bankId={bank.id}>
+    <AdminShell activeKey="banks" userName={session.user.displayName}>
       <div className="list-grid">
         <section className="admin-panel" style={{ padding: 24 }}>
           <div className="mobile-page-header">
+            <div className="inline-actions" style={{ marginBottom: 12 }}>
+              <Link href="/admin/banks" className="admin-secondary-link">
+                返回题库列表
+              </Link>
+              <Link
+                href={`/admin/banks/${bank.id}/edit`}
+                className="admin-secondary-link"
+              >
+                编辑题库
+              </Link>
+              <Link
+                href={`/admin/banks/${bank.id}/questions`}
+                className="admin-secondary-link"
+              >
+                题目管理
+              </Link>
+            </div>
             <h1>{bank.name} / 法条资料管理</h1>
-            <p>当前共检索到 {documents.total} 份资料，支持上传、删除和查看处理状态。</p>
+            <p>题库编码：{bank.code}。支持上传、删除和查看资料处理状态。</p>
           </div>
           <p className="page-note">
             系统会在资料上传后异步抽取文本切片，并重建当前题库的法条匹配结果。
@@ -63,7 +82,11 @@ export default async function AdminStatutesPage({
         ) : null}
 
         {documents.items.map((document) => (
-          <section key={document.id} className="admin-panel" style={{ padding: 24 }}>
+          <section
+            key={document.id}
+            className="admin-panel"
+            style={{ padding: 24 }}
+          >
             <div className="mobile-page-header">
               <h1 style={{ fontSize: 22 }}>{document.title}</h1>
               <p>
@@ -71,7 +94,9 @@ export default async function AdminStatutesPage({
                 {Math.ceil(document.fileSize / 1024)} KB
               </p>
             </div>
-            {document.lastError ? <div style={{ color: "var(--danger)" }}>{document.lastError}</div> : null}
+            {document.lastError ? (
+              <div style={{ color: "var(--danger)" }}>{document.lastError}</div>
+            ) : null}
             <DeleteDocumentButton documentId={document.id} />
           </section>
         ))}

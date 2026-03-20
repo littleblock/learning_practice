@@ -40,7 +40,9 @@ export function BankListTable({ banks }: BankListTableProps) {
             <tr key={bank.id}>
               <td>
                 <div className="admin-table-title">{bank.name}</div>
-                <div className="admin-table-note">{bank.description || "暂无题库简介"}</div>
+                <div className="admin-table-note">
+                  {bank.description || "暂无题库简介"}
+                </div>
               </td>
               <td>{bank.code}</td>
               <td>
@@ -60,20 +62,33 @@ export function BankListTable({ banks }: BankListTableProps) {
               <td className="admin-table-actions-cell">
                 <div className="admin-table-actions">
                   <div className="admin-table-action-links">
-                    <Link href={`/admin/banks/${bank.id}/edit`} className="admin-table-link">
+                    <Link
+                      href={`/admin/banks/${bank.id}/edit`}
+                      className="admin-table-link"
+                    >
                       编辑
                     </Link>
                     <span className="admin-table-action-divider">|</span>
-                    <Link href={`/admin/banks/${bank.id}/questions`} className="admin-table-link">
+                    <Link
+                      href={`/admin/banks/${bank.id}/questions`}
+                      className="admin-table-link"
+                    >
                       题目管理
                     </Link>
                     <span className="admin-table-action-divider">|</span>
-                    <Link href={`/admin/banks/${bank.id}/statutes`} className="admin-table-link">
+                    <Link
+                      href={`/admin/banks/${bank.id}/statutes`}
+                      className="admin-table-link"
+                    >
                       法条资料
                     </Link>
                   </div>
                   <div className="admin-table-action-row">
-                    <BankStatusButton bankId={bank.id} status={bank.status} variant="table" />
+                    <BankStatusButton
+                      bankId={bank.id}
+                      status={bank.status}
+                      variant="table"
+                    />
                   </div>
                 </div>
               </td>

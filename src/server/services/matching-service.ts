@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 
 import { MATCH_SCORE_THRESHOLD } from "@/shared/constants/app";
 import { questionOptionSchema } from "@/shared/schemas/question";
@@ -10,7 +11,7 @@ function parseQuestionOptions(value: Prisma.JsonValue) {
 }
 
 function parseCorrectAnswers(value: Prisma.JsonValue) {
-  return (value as Prisma.JsonArray).map((item) => String(item));
+  return z.array(z.string()).parse(value);
 }
 
 export function buildQuestionEmbeddingText(input: {
@@ -35,19 +36,13 @@ export function buildQuestionEmbeddingText(input: {
 }
 
 export async function saveQuestionEmbedding(questionId: string, vector: number[]) {
-  await prisma.$executeRawUnsafe(
-    'UPDATE "Question" SET "embedding" = $1::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = $2',
-    vectorToSqlLiteral(vector),
-    questionId,
-  );
+  const vectorLiteral = vectorToSqlLiteral(vector);
+  await prisma.$executeRaw`UPDATE "Question" SET "embedding" = ${vectorLiteral}::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = ${questionId}`;
 }
 
 export async function saveStatuteChunkEmbedding(chunkId: string, vector: number[]) {
-  await prisma.$executeRawUnsafe(
-    'UPDATE "StatuteChunk" SET "embedding" = $1::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = $2',
-    vectorToSqlLiteral(vector),
-    chunkId,
-  );
+  const vectorLiteral = vectorToSqlLiteral(vector);
+  await prisma.$executeRaw`UPDATE "StatuteChunk" SET "embedding" = ${vectorLiteral}::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = ${chunkId}`;
 }
 
 export async function refreshQuestionEmbedding(questionId: string) {
@@ -127,23 +122,24 @@ export async function rebuildQuestionMatchesForBank(bankId: string, questionIds?
       await refreshQuestionEmbedding(question.id);
     }
 
-    const vectorRows = await prisma.$queryRawUnsafe<Array<{ embedding: string }>>(
-      'SELECT "embedding"::text AS "embedding" FROM "Question" WHERE "id" = $1 AND "embedding" IS NOT NULL',
-      question.id,
-    );
+    const vectorRows = await prisma.$queryRaw<Array<{ embedding: string }>>`
+      SELECT "embedding"::text AS "embedding" FROM "Question" WHERE "id" = ${question.id} AND "embedding" IS NOT NULL
+    `;
 
     const vector = vectorRows[0]?.embedding;
     if (!vector) {
       continue;
     }
 
-    const bestChunk = await prisma.$queryRawUnsafe<
+    const bestChunk = await prisma.$queryRaw<
       Array<{ id: string; content: string; score: number }>
-    >(
-      'SELECT "id", "content", 1 - ("embedding" <=> $1::vector) AS "score" FROM "StatuteChunk" WHERE "bankId" = $2 AND "embedding" IS NOT NULL ORDER BY "embedding" <=> $1::vector ASC LIMIT 1',
-      vector,
-      bankId,
-    );
+    >`
+      SELECT "id", "content", 1 - ("embedding" <=> ${vector}::vector) AS "score"
+      FROM "StatuteChunk"
+      WHERE "bankId" = ${bankId} AND "embedding" IS NOT NULL
+      ORDER BY "embedding" <=> ${vector}::vector ASC
+      LIMIT 1
+    `;
 
     const matchedChunk = bestChunk[0];
     if (!matchedChunk) {

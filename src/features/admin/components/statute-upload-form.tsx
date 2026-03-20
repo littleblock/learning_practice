@@ -19,7 +19,7 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
 
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
-      setErrorMessage("请选择要上传的资料文件。");
+      setErrorMessage("请选择要上传的资料文件");
       return;
     }
 
@@ -51,10 +51,18 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
 
   return (
     <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-      <Input placeholder="资料标题，可选" value={title} onChange={(event) => setTitle(event.target.value)} />
+      <Input
+        placeholder="资料标题，可选"
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+      />
       <input ref={fileInputRef} type="file" accept=".txt,.md,.docx,.pdf" />
-      {errorMessage ? <div style={{ color: "var(--danger)" }}>{errorMessage}</div> : null}
-      {successMessage ? <div style={{ color: "var(--success)" }}>{successMessage}</div> : null}
+      {errorMessage ? (
+        <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
+      ) : null}
+      {successMessage ? (
+        <div style={{ color: "var(--success)" }}>{successMessage}</div>
+      ) : null}
       <Button htmlType="submit" type="primary" loading={isPending}>
         上传资料
       </Button>

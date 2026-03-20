@@ -65,20 +65,42 @@ enum JobStatus {
   FAILED
 }
 
+enum QuestionImportBatchStatus {
+  PENDING
+  PROCESSING
+  READY
+  CONFIRMED
+  FAILED
+}
+
+enum QuestionImportTemplateType {
+  STANDARD
+  AI
+}
+
+enum QuestionImportSourceStatus {
+  HEADER
+  MATCHED
+  FAILED
+}
+
 model User {
-  id              String             @id @default(cuid())
-  role            UserRole
-  status          UserStatus         @default(ACTIVE)
-  loginName       String             @unique
-  phone           String?            @unique
-  displayName     String
-  passwordHash    String
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  sessions        UserSession[]
-  practiceSessions PracticeSession[]
-  practiceAttempts PracticeAttempt[]
-  questionStats   UserQuestionStat[]
+  id                   String                @id @default(cuid())
+  role                 UserRole
+  status               UserStatus            @default(ACTIVE)
+  loginName            String                @unique
+  phone                String?               @unique
+  displayName          String
+  passwordHash         String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  sessions             UserSession[]
+  practiceSessions     PracticeSession[]
+  practiceAttempts     PracticeAttempt[]
+  questionStats        UserQuestionStat[]
+  createdQuestions     Question[]            @relation("QuestionCreatedBy")
+  updatedQuestions     Question[]            @relation("QuestionUpdatedBy")
+  questionImportBatches QuestionImportBatch[] @relation("QuestionImportBatchCreatedBy")
 }
 
 model UserSession {
@@ -108,6 +130,7 @@ model QuestionBank {
   questionStats    UserQuestionStat[]
   statuteChunks    StatuteChunk[]
   statuteMatches   QuestionStatuteMatch[]
+  importBatches    QuestionImportBatch[]
 
   @@index([status, sortOrder])
 }
@@ -115,6 +138,8 @@ model QuestionBank {
 model Question {
   id                 String                 @id @default(cuid())
   bankId             String
+  createdById        String?
+  updatedById        String?
   type               QuestionType
   stem               String                 @db.Text
   options            Json
@@ -127,6 +152,8 @@ model Question {
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
   bank               QuestionBank           @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  createdBy          User?                  @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy          User?                  @relation("QuestionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   practiceItems      PracticeSessionItem[]
   attempts           PracticeAttempt[]
   questionStats      UserQuestionStat[]
@@ -135,6 +162,69 @@ model Question {
   @@unique([bankId, sortOrder])
   @@index([bankId, sortOrder])
   @@index([bankId, type])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model QuestionImportBatch {
+  id             String                     @id @default(cuid())
+  bankId         String
+  createdById    String
+  fileName       String
+  storagePath    String
+  sourceSheetName String?
+  templateType   QuestionImportTemplateType?
+  status         QuestionImportBatchStatus  @default(PENDING)
+  lastError      String?                    @db.Text
+  draftCount     Int                        @default(0)
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+  parsedAt       DateTime?
+  confirmedAt    DateTime?
+  bank           QuestionBank               @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  createdBy      User                       @relation("QuestionImportBatchCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  drafts         QuestionImportDraft[]
+  sourceRows     QuestionImportSourceRow[]
+
+  @@index([bankId, status, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model QuestionImportDraft {
+  id             String              @id @default(cuid())
+  batchId        String
+  type           QuestionType
+  stem           String              @db.Text
+  options        Json
+  correctAnswers Json
+  analysis       String?             @db.Text
+  lawSource      String?
+  sortOrder      Int
+  sourceLabel    String?
+  sourceContent  String?             @db.Text
+  sourceRowNumbers Json?
+  isDeleted      Boolean             @default(false)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  batch          QuestionImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, isDeleted, sortOrder])
+}
+
+model QuestionImportSourceRow {
+  id                String                   @id @default(cuid())
+  batchId           String
+  rowNumber         Int
+  status            QuestionImportSourceStatus
+  content           String                   @db.Text
+  reason            String?                  @db.Text
+  matchedSortOrders Json?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  batch             QuestionImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status, rowNumber])
 }
 
 model StatuteDocument {

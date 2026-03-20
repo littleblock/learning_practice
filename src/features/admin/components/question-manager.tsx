@@ -1,277 +1,390 @@
 "use client";
 
-import { QuestionType } from "@prisma/client";
-import { Button, Card, Input, Select, Space } from "antd";
+import { Button, Tabs } from "antd";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
-interface QuestionOption {
-  label: string;
-  text: string;
-}
+import { QuestionFilters } from "@/features/admin/components/admin-filters";
+import { AdminPagination } from "@/features/admin/components/admin-pagination";
+import { QuestionEditorModal } from "@/features/admin/components/question-editor-modal";
+import { QuestionImportModal } from "@/features/admin/components/question-import-modal";
+import type {
+  QuestionImportBatchSummary,
+  QuestionListItem,
+} from "@/shared/types/domain";
+import { getQuestionTypeLabel } from "@/shared/utils/answers";
+import {
+  formatDateTime,
+  getBatchStatusLabel,
+  getImportTemplateTypeLabel,
+  joinOptions,
+  truncateText,
+} from "@/shared/utils/format";
 
-interface AdminQuestionRecord {
-  id: string;
-  type: QuestionType;
-  stem: string;
-  options: QuestionOption[];
-  correctAnswers: string[];
-  analysis: string | null;
-  lawSource: string | null;
-  sortOrder: number;
-}
-
-interface QuestionFormState {
-  type: QuestionType;
-  stem: string;
-  optionA: string;
-  optionB: string;
-  optionC: string;
-  optionD: string;
-  optionE: string;
-  optionF: string;
-  correctAnswers: string;
-  analysis: string;
-  lawSource: string;
-  sortOrder: number;
-}
-
-const emptyForm: QuestionFormState = {
-  type: QuestionType.SINGLE,
-  stem: "",
-  optionA: "",
-  optionB: "",
-  optionC: "",
-  optionD: "",
-  optionE: "",
-  optionF: "",
-  correctAnswers: "",
-  analysis: "",
-  lawSource: "",
-  sortOrder: 1,
-};
-
-function toFormState(question?: AdminQuestionRecord): QuestionFormState {
-  if (!question) {
-    return emptyForm;
+function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
+  switch (status) {
+    case "READY":
+      return "处理结果";
+    case "PENDING":
+    case "PROCESSING":
+      return "查看进度";
+    case "FAILED":
+      return "查看失败";
+    case "CONFIRMED":
+      return "查看结果";
+    default:
+      return "查看";
   }
-
-  const optionMap = new Map(question.options.map((item) => [item.label, item.text]));
-
-  return {
-    type: question.type,
-    stem: question.stem,
-    optionA: optionMap.get("A") ?? "",
-    optionB: optionMap.get("B") ?? "",
-    optionC: optionMap.get("C") ?? "",
-    optionD: optionMap.get("D") ?? "",
-    optionE: optionMap.get("E") ?? "",
-    optionF: optionMap.get("F") ?? "",
-    correctAnswers: question.correctAnswers.join(","),
-    analysis: question.analysis ?? "",
-    lawSource: question.lawSource ?? "",
-    sortOrder: question.sortOrder,
-  };
 }
 
 export function QuestionManager({
   bankId,
   questions,
+  nextSortOrder,
+  importBatches,
+  importBatchPage,
+  importBatchPageSize,
+  importBatchTotal,
+  questionQuery,
+  questionPage,
+  questionPageSize,
+  questionTotal,
+  activeTab,
+  keyword,
+  type,
+  lawSource,
+  recordPage,
+  recordPageSize,
 }: {
   bankId: string;
-  questions: AdminQuestionRecord[];
+  questions: QuestionListItem[];
+  nextSortOrder: number;
+  importBatches: QuestionImportBatchSummary[];
+  importBatchPage: number;
+  importBatchPageSize: number;
+  importBatchTotal: number;
+  questionQuery: Record<string, string | undefined>;
+  questionPage: number;
+  questionPageSize: number;
+  questionTotal: number;
+  activeTab: "questions" | "imports";
+  keyword: string;
+  type: string;
+  lawSource: string;
+  recordPage: string;
+  recordPageSize: string;
 }) {
   const router = useRouter();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formState, setFormState] = useState<QuestionFormState>(emptyForm);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isPending, startTransition] = useTransition();
-
-  const nextSortOrder = Math.max(1, ...questions.map((item) => item.sortOrder + 1));
-
-  async function submitQuestion(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setErrorMessage("");
-
-    const options = ["A", "B", "C", "D", "E", "F"]
-      .map((label) => ({
-        label,
-        text: formState[`option${label}` as keyof QuestionFormState] as string,
-      }))
-      .filter((item) => item.text.trim().length > 0);
-
-    const payload = {
-      type: formState.type,
-      stem: formState.stem,
-      options,
-      correctAnswers: formState.correctAnswers
-        .split(/[、,，\s]+/)
-        .map((item) => item.trim().toUpperCase())
-        .filter(Boolean),
-      analysis: formState.analysis || null,
-      lawSource: formState.lawSource || null,
-      sortOrder: Number(formState.sortOrder),
-    };
-
-    const endpoint = editingId ? `/api/admin/questions/${editingId}` : `/api/admin/questions?bankId=${bankId}`;
-    const method = editingId ? "PATCH" : "POST";
-
-    const response = await fetch(endpoint, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const result = (await response.json()) as { message?: string };
-    if (!response.ok) {
-      setErrorMessage(result.message ?? "保存题目失败");
-      return;
-    }
-
-    setEditingId(null);
-    setFormState({
-      ...emptyForm,
-      sortOrder: nextSortOrder,
-    });
-    startTransition(() => {
-      router.refresh();
-    });
-  }
+  const [editingQuestion, setEditingQuestion] =
+    useState<QuestionListItem | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function deleteQuestion(questionId: string) {
-    await fetch(`/api/admin/questions/${questionId}`, {
-      method: "DELETE",
-    });
+    setDeletingId(questionId);
+    setDeleteError(null);
 
-    startTransition(() => {
+    try {
+      const response = await fetch(`/api/admin/questions/${questionId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        setDeleteError(payload.message ?? "删除题目失败");
+        return;
+      }
+
       router.refresh();
-    });
+    } catch (error) {
+      console.error("删除题目失败", error);
+      setDeleteError("删除题目失败");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function openEditor(question: QuestionListItem | null) {
+    setEditingQuestion(question);
+    setEditorOpen(true);
+  }
+
+  function openImport(batchId: string | null = null) {
+    setActiveBatchId(batchId);
+    setImportOpen(true);
+  }
+
+  function buildTabQuery(tab: "questions" | "imports") {
+    return {
+      ...questionQuery,
+      tab,
+    };
+  }
+
+  function handleTabChange(tab: string) {
+    const targetTab = tab === "imports" ? "imports" : "questions";
+    const searchParams = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(buildTabQuery(targetTab))) {
+      if (value) {
+        searchParams.set(key, value);
+      }
+    }
+
+    router.push(`/admin/banks/${bankId}/questions?${searchParams.toString()}`);
   }
 
   return (
-    <div className="list-grid">
-      <Card title={editingId ? "编辑题目" : "新增题目"}>
-        <form onSubmit={submitQuestion} style={{ display: "grid", gap: 12 }}>
-          <Select
-            value={formState.type}
-            options={[
-              { value: QuestionType.SINGLE, label: "单选题" },
-              { value: QuestionType.MULTIPLE, label: "多选题" },
-              { value: QuestionType.JUDGE, label: "判断题" },
-            ]}
-            onChange={(value) =>
-              setFormState((current) => ({
-                ...current,
-                type: value as QuestionType,
-              }))
-            }
-          />
-          <Input.TextArea
-            rows={4}
-            placeholder="题干"
-            value={formState.stem}
-            onChange={(event) => setFormState((current) => ({ ...current, stem: event.target.value }))}
-          />
-          <Space.Compact direction="vertical" style={{ width: "100%" }}>
-            {["A", "B", "C", "D", "E", "F"].map((label) => (
-              <Input
-                key={label}
-                placeholder={`选项 ${label}`}
-                value={formState[`option${label}` as keyof QuestionFormState] as string}
-                onChange={(event) =>
-                  setFormState((current) => ({
-                    ...current,
-                    [`option${label}`]: event.target.value,
-                  }))
-                }
-              />
-            ))}
-          </Space.Compact>
-          <Input
-            placeholder="正确答案，多个答案可用逗号分隔"
-            value={formState.correctAnswers}
-            onChange={(event) =>
-              setFormState((current) => ({ ...current, correctAnswers: event.target.value }))
-            }
-          />
-          <Input
-            placeholder="法律来源"
-            value={formState.lawSource}
-            onChange={(event) => setFormState((current) => ({ ...current, lawSource: event.target.value }))}
-          />
-          <Input.TextArea
-            rows={3}
-            placeholder="解析"
-            value={formState.analysis}
-            onChange={(event) => setFormState((current) => ({ ...current, analysis: event.target.value }))}
-          />
-          <Input
-            type="number"
-            placeholder="题目排序"
-            value={String(formState.sortOrder)}
-            onChange={(event) =>
-              setFormState((current) => ({
-                ...current,
-                sortOrder: Number(event.target.value || nextSortOrder),
-              }))
-            }
-          />
-          {errorMessage ? <div style={{ color: "var(--danger)" }}>{errorMessage}</div> : null}
-          <Space>
-            <Button type="primary" htmlType="submit" loading={isPending}>
-              {editingId ? "保存修改" : "新增题目"}
-            </Button>
-            {editingId ? (
-              <Button
-                onClick={() => {
-                  setEditingId(null);
-                  setFormState({ ...emptyForm, sortOrder: nextSortOrder });
-                }}
-              >
-                取消编辑
-              </Button>
-            ) : null}
-          </Space>
-        </form>
-      </Card>
+    <>
+      <section className="admin-panel admin-tabs-panel">
+        <Tabs
+          className="admin-content-tabs"
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          items={[
+            {
+              key: "questions",
+              label: `题目列表（${questionTotal}）`,
+              children: (
+                <div className="admin-tab-content">
+                  <div className="admin-section-header" style={{ marginBottom: 16 }}>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: 20 }}>题目列表</h2>
+                      <p className="page-note" style={{ marginTop: 8 }}>
+                        支持分页查看、单题维护和导入后的结果核验。
+                      </p>
+                    </div>
+                    <div className="inline-actions">
+                      <Button type="primary" onClick={() => openEditor(null)}>
+                        新增题目
+                      </Button>
+                    </div>
+                  </div>
 
-      {questions.map((question) => (
-        <Card
-          key={question.id}
-          title={`#${question.sortOrder} ${question.stem}`}
-          extra={
-            <span>
-              {question.type === QuestionType.SINGLE
-                ? "单选题"
-                : question.type === QuestionType.MULTIPLE
-                  ? "多选题"
-                  : "判断题"}
-            </span>
-          }
-        >
-          <div className="list-grid">
-            <div>正确答案：{question.correctAnswers.join("、")}</div>
-            <div>法律来源：{question.lawSource || "未填写"}</div>
-            <div>解析：{question.analysis || "未填写"}</div>
-            <div>选项：{question.options.map((item) => `${item.label}. ${item.text}`).join(" / ")}</div>
-            <Space>
-              <Button
-                onClick={() => {
-                  setEditingId(question.id);
-                  setFormState(toFormState(question));
-                }}
-              >
-                编辑
-              </Button>
-              <Button danger onClick={() => deleteQuestion(question.id)}>
-                删除
-              </Button>
-            </Space>
-          </div>
-        </Card>
-      ))}
-    </div>
+                  <QuestionFilters
+                    bankId={bankId}
+                    keyword={keyword}
+                    type={type}
+                    lawSource={lawSource}
+                    pageSize={String(questionPageSize)}
+                    preservedQuery={{
+                      tab: "questions",
+                      recordPage,
+                      recordPageSize,
+                    }}
+                  />
+
+                  <p className="page-note" style={{ marginTop: 14 }}>
+                    当前共筛选到 {questionTotal} 道题目。
+                  </p>
+
+                  <AdminPagination
+                    basePath={`/admin/banks/${bankId}/questions`}
+                    page={questionPage}
+                    pageSize={questionPageSize}
+                    total={questionTotal}
+                    query={buildTabQuery("questions")}
+                  />
+
+                  {deleteError ? (
+                    <div style={{ color: "var(--danger)", marginBottom: 12 }}>
+                      {deleteError}
+                    </div>
+                  ) : null}
+
+                  {questions.length === 0 ? (
+                    <div className="admin-empty-state">
+                      当前筛选结果为空，可以调整筛选条件，或通过新增题目、Excel 导入补充内容。
+                    </div>
+                  ) : (
+                    <div className="admin-table-wrap">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            <th>序号</th>
+                            <th>题目类型</th>
+                            <th>题干</th>
+                            <th>选项</th>
+                            <th>正确答案</th>
+                            <th>解析</th>
+                            <th>答案来源</th>
+                            <th>创建人</th>
+                            <th>创建时间</th>
+                            <th>更新人</th>
+                            <th>更新时间</th>
+                            <th>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {questions.map((question) => (
+                            <tr key={question.id}>
+                              <td>{question.sortOrder}</td>
+                              <td>{getQuestionTypeLabel(question.type)}</td>
+                              <td title={question.stem}>
+                                {truncateText(question.stem, 80)}
+                              </td>
+                              <td title={joinOptions(question.options)}>
+                                {truncateText(joinOptions(question.options), 120)}
+                              </td>
+                              <td>{question.correctAnswers.join(", ")}</td>
+                              <td title={question.analysis || "-"}>
+                                {truncateText(question.analysis, 60)}
+                              </td>
+                              <td title={question.lawSource || "-"}>
+                                {truncateText(question.lawSource, 40)}
+                              </td>
+                              <td>{question.createdByName || "-"}</td>
+                              <td>{formatDateTime(question.createdAt)}</td>
+                              <td>{question.updatedByName || "-"}</td>
+                              <td>{formatDateTime(question.updatedAt)}</td>
+                              <td className="admin-table-actions-cell">
+                                <div className="admin-table-action-links">
+                                  <button
+                                    type="button"
+                                    className="admin-table-inline-button"
+                                    onClick={() => openEditor(question)}
+                                  >
+                                    编辑
+                                  </button>
+                                  <span className="admin-table-action-divider">|</span>
+                                  <button
+                                    type="button"
+                                    className="admin-table-inline-button is-danger"
+                                    onClick={() => void deleteQuestion(question.id)}
+                                    disabled={deletingId === question.id}
+                                  >
+                                    {deletingId === question.id ? "删除中..." : "删除"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: "imports",
+              label: `导入记录（${importBatchTotal}）`,
+              children: (
+                <div className="admin-tab-content">
+                  <div className="admin-section-header" style={{ marginBottom: 16 }}>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: 20 }}>导入记录</h2>
+                      <p className="page-note" style={{ marginTop: 8 }}>
+                        只有标准模板按规则解析，其他文件全部交给 AI 识别。每一行都会记录是否成功匹配为题目。
+                      </p>
+                    </div>
+                    <div className="inline-actions">
+                      <Link href="/api/admin/questions/import/template">
+                        下载标准模板
+                      </Link>
+                      <Button onClick={() => router.refresh()}>刷新记录</Button>
+                      <Button type="primary" onClick={() => openImport(null)}>
+                        Excel 导入
+                      </Button>
+                    </div>
+                  </div>
+
+                  <AdminPagination
+                    basePath={`/admin/banks/${bankId}/questions`}
+                    page={importBatchPage}
+                    pageSize={importBatchPageSize}
+                    total={importBatchTotal}
+                    query={buildTabQuery("imports")}
+                    pageParam="recordPage"
+                    pageSizeParam="recordPageSize"
+                  />
+
+                  {importBatches.length === 0 ? (
+                    <div className="admin-empty-state">
+                      当前题库还没有导入记录，点击“Excel 导入”即可上传文件并查看解析结果。
+                    </div>
+                  ) : (
+                    <div className="admin-table-wrap">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            <th>文件名</th>
+                            <th>解析方式</th>
+                            <th>状态</th>
+                            <th>草稿数</th>
+                            <th>工作表</th>
+                            <th>上传时间</th>
+                            <th>解析时间</th>
+                            <th>确认时间</th>
+                            <th>错误信息</th>
+                            <th>操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importBatches.map((batch) => (
+                            <tr key={batch.id}>
+                              <td title={batch.fileName}>
+                                {truncateText(batch.fileName, 48)}
+                              </td>
+                              <td>{getImportTemplateTypeLabel(batch.templateType)}</td>
+                              <td>{getBatchStatusLabel(batch.status)}</td>
+                              <td>{batch.draftCount}</td>
+                              <td title={batch.sourceSheetName || "-"}>
+                                {truncateText(batch.sourceSheetName, 24)}
+                              </td>
+                              <td>{formatDateTime(batch.createdAt)}</td>
+                              <td>{formatDateTime(batch.parsedAt)}</td>
+                              <td>{formatDateTime(batch.confirmedAt)}</td>
+                              <td title={batch.lastError || "-"}>
+                                {truncateText(batch.lastError, 48)}
+                              </td>
+                              <td className="admin-table-actions-cell">
+                                <div className="admin-table-action-links">
+                                  <button
+                                    type="button"
+                                    className="admin-table-inline-button"
+                                    onClick={() => openImport(batch.id)}
+                                  >
+                                    {getBatchActionLabel(batch.status)}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </section>
+
+      <QuestionEditorModal
+        bankId={bankId}
+        open={editorOpen}
+        question={editingQuestion}
+        nextSortOrder={nextSortOrder}
+        onClose={() => setEditorOpen(false)}
+        onSuccess={() => router.refresh()}
+      />
+
+      <QuestionImportModal
+        bankId={bankId}
+        open={importOpen}
+        initialBatchId={activeBatchId}
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => router.refresh()}
+        onBatchChange={() => router.refresh()}
+      />
+    </>
   );
 }

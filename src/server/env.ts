@@ -9,6 +9,14 @@ const serverEnvSchema = z.object({
   AI_API_KEY: z.string().default(""),
   AI_EMBED_MODEL: z.string().default("text-embedding-3-small"),
   AI_EMBED_DIMENSION: z.coerce.number().int().min(8).default(1536),
+  AI_SPLIT_BASE_URL: z
+    .string()
+    .url()
+    .default("https://coding.dashscope.aliyuncs.com/v1"),
+  AI_SPLIT_API_KEY: z.string().default(""),
+  AI_SPLIT_MODEL: z.string().default("glm-4.7"),
+  AI_SPLIT_TIMEOUT_MS: z.coerce.number().int().min(1000).default(60000),
+  AI_SPLIT_MAX_RETRIES: z.coerce.number().int().min(1).max(5).default(2),
   APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   ENABLE_SENTRY: z
     .enum(["true", "false"])

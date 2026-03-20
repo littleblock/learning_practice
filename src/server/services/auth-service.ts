@@ -4,6 +4,8 @@ import { UserRole } from "@prisma/client";
 import { loginSchema, type LoginInput } from "@/shared/schemas/auth";
 import { prisma } from "@/server/db/client";
 
+const DUMMY_HASH = "$2a$10$K4GByGBaQ0ijk0.Dp5R5duMPmSBnSGpAwnRQdOqZ5AQKUV1jGS0Ky";
+
 export async function authenticateUser(input: LoginInput, role: UserRole) {
   const payload = loginSchema.parse(input);
 
@@ -14,12 +16,10 @@ export async function authenticateUser(input: LoginInput, role: UserRole) {
     },
   });
 
-  if (!user || user.status !== "ACTIVE") {
-    return null;
-  }
+  const hashToCompare = user?.passwordHash ?? DUMMY_HASH;
+  const isPasswordValid = await bcrypt.compare(payload.password, hashToCompare);
 
-  const isPasswordValid = await bcrypt.compare(payload.password, user.passwordHash);
-  if (!isPasswordValid) {
+  if (!user || user.status !== "ACTIVE" || !isPasswordValid) {
     return null;
   }
 

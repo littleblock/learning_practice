@@ -1,8 +1,15 @@
 import { UserRole } from "@prisma/client";
 
 import { requireApiRole, unauthorizedResponse } from "@/server/auth/guards";
-import { getRequestId, jsonWithRequestId, routeErrorResponse } from "@/server/http";
-import { deleteQuestion, updateQuestion } from "@/server/services/question-service";
+import {
+  getRequestId,
+  jsonWithRequestId,
+  routeErrorResponse,
+} from "@/server/http";
+import {
+  deleteQuestion,
+  updateQuestion,
+} from "@/server/services/question-service";
 
 export async function PATCH(
   request: Request,
@@ -17,7 +24,7 @@ export async function PATCH(
   try {
     const payload = await request.json();
     const { questionId } = await params;
-    const result = await updateQuestion(questionId, payload);
+    const result = await updateQuestion(questionId, payload, session.user.id);
     return jsonWithRequestId(result, requestId);
   } catch (error) {
     return routeErrorResponse(error, requestId);

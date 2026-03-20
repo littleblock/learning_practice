@@ -2,9 +2,7 @@ import { JobType } from "@prisma/client";
 import { z } from "zod";
 
 const importQuestionsJobSchema = z.object({
-  bankId: z.string().cuid(),
-  storagePath: z.string().min(1),
-  fileName: z.string().min(1),
+  batchId: z.string().cuid(),
 });
 
 const processStatuteDocumentJobSchema = z.object({
@@ -16,9 +14,15 @@ const rebuildQuestionMatchJobSchema = z.object({
   questionIds: z.array(z.string().cuid()).optional(),
 });
 
-export type ImportQuestionsJobPayload = z.infer<typeof importQuestionsJobSchema>;
-export type ProcessStatuteDocumentJobPayload = z.infer<typeof processStatuteDocumentJobSchema>;
-export type RebuildQuestionMatchJobPayload = z.infer<typeof rebuildQuestionMatchJobSchema>;
+export type ImportQuestionsJobPayload = z.infer<
+  typeof importQuestionsJobSchema
+>;
+export type ProcessStatuteDocumentJobPayload = z.infer<
+  typeof processStatuteDocumentJobSchema
+>;
+export type RebuildQuestionMatchJobPayload = z.infer<
+  typeof rebuildQuestionMatchJobSchema
+>;
 
 export function parseJobPayload(type: JobType, payload: unknown) {
   switch (type) {

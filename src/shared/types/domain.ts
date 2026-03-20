@@ -3,6 +3,9 @@ import type {
   PracticeMode,
   PracticeSessionStatus,
   PracticeSourceType,
+  QuestionImportBatchStatus,
+  QuestionImportSourceStatus,
+  QuestionImportTemplateType,
   QuestionType,
 } from "@prisma/client";
 
@@ -71,7 +74,63 @@ export interface QuestionListItem {
   analysis: string | null;
   lawSource: string | null;
   sortOrder: number;
+  createdByName: string | null;
+  updatedByName: string | null;
+  createdAt: string;
   updatedAt: string;
+}
+
+export interface QuestionImportDraftItem {
+  id: string;
+  type: QuestionType;
+  stem: string;
+  options: QuestionOption[];
+  correctAnswers: string[];
+  analysis: string | null;
+  lawSource: string | null;
+  sortOrder: number;
+  sourceLabel: string | null;
+  sourceContent: string | null;
+  sourceRowNumbers: number[];
+  isDeleted: boolean;
+}
+
+export interface QuestionImportSourceRowItem {
+  id: string;
+  rowNumber: number;
+  status: QuestionImportSourceStatus;
+  content: string;
+  reason: string | null;
+  matchedSortOrders: number[];
+}
+
+export interface QuestionImportBatchDetail {
+  id: string;
+  bankId: string;
+  fileName: string;
+  sourceSheetName: string | null;
+  templateType: QuestionImportTemplateType | null;
+  status: QuestionImportBatchStatus;
+  draftCount: number;
+  lastError: string | null;
+  createdAt: string;
+  parsedAt: string | null;
+  confirmedAt: string | null;
+  drafts: QuestionImportDraftItem[];
+  sourceRows: QuestionImportSourceRowItem[];
+}
+
+export interface QuestionImportBatchSummary {
+  id: string;
+  fileName: string;
+  sourceSheetName: string | null;
+  templateType: QuestionImportTemplateType | null;
+  status: QuestionImportBatchStatus;
+  draftCount: number;
+  lastError: string | null;
+  createdAt: string;
+  parsedAt: string | null;
+  confirmedAt: string | null;
 }
 
 export interface StatuteDocumentListItem {
