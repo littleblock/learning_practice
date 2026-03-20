@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  LEARNER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BankStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum QuestionType {
+  SINGLE
+  MULTIPLE
+  JUDGE
+}
+
+enum PracticeSourceType {
+  NORMAL
+  WRONG_BOOK
+}
+
+enum PracticeMode {
+  SEQUENTIAL
+  REVERSE
+  RANDOM
+}
+
+enum PracticeSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum DocumentProcessStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum JobType {
+  IMPORT_QUESTIONS
+  PROCESS_STATUTE_DOCUMENT
+  REBUILD_QUESTION_MATCH
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id              String             @id @default(cuid())
+  role            UserRole
+  status          UserStatus         @default(ACTIVE)
+  loginName       String             @unique
+  phone           String?            @unique
+  displayName     String
+  passwordHash    String
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  sessions        UserSession[]
+  practiceSessions PracticeSession[]
+  practiceAttempts PracticeAttempt[]
+  questionStats   UserQuestionStat[]
+}
+
+model UserSession {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model QuestionBank {
+  id               String                 @id @default(cuid())
+  code             String                 @unique
+  name             String
+  description      String?                @db.Text
+  status           BankStatus             @default(ACTIVE)
+  sortOrder        Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  questions        Question[]
+  statuteDocuments StatuteDocument[]
+  practiceSessions PracticeSession[]
+  questionStats    UserQuestionStat[]
+  statuteChunks    StatuteChunk[]
+  statuteMatches   QuestionStatuteMatch[]
+
+  @@index([status, sortOrder])
+}
+
+model Question {
+  id                 String                 @id @default(cuid())
+  bankId             String
+  type               QuestionType
+  stem               String                 @db.Text
+  options            Json
+  correctAnswers     Json
+  analysis           String?                @db.Text
+  lawSource          String?
+  sortOrder          Int                    @default(0)
+  embedding          Unsupported("vector")?
+  embeddingUpdatedAt DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  bank               QuestionBank           @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  practiceItems      PracticeSessionItem[]
+  attempts           PracticeAttempt[]
+  questionStats      UserQuestionStat[]
+  statuteMatch       QuestionStatuteMatch?
+
+  @@unique([bankId, sortOrder])
+  @@index([bankId, sortOrder])
+  @@index([bankId, type])
+}
+
+model StatuteDocument {
+  id               String                @id @default(cuid())
+  bankId           String
+  title            String
+  fileName         String
+  fileMime         String
+  storagePath      String
+  fileSize         Int
+  status           DocumentProcessStatus @default(PENDING)
+  extractedText    String?               @db.Text
+  lastError        String?               @db.Text
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  bank             QuestionBank          @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  chunks           StatuteChunk[]
+
+  @@index([bankId, status, createdAt])
+}
+
+model StatuteChunk {
+  id                 String                 @id @default(cuid())
+  bankId             String
+  documentId         String
+  chunkIndex         Int
+  content            String                 @db.Text
+  preview            String
+  embedding          Unsupported("vector")?
+  embeddingUpdatedAt DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  bank               QuestionBank           @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  document           StatuteDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  questionMatches    QuestionStatuteMatch[]
+
+  @@unique([documentId, chunkIndex])
+  @@index([bankId, documentId, chunkIndex])
+}
+
+model QuestionStatuteMatch {
+  id         String       @id @default(cuid())
+  bankId     String
+  questionId String       @unique
+  chunkId    String
+  score      Float
+  excerpt    String       @db.Text
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  bank       QuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  question   Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  chunk      StatuteChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@index([bankId, score])
+}
+
+model PracticeSession {
+  id            String                @id @default(cuid())
+  userId        String
+  bankId        String
+  sourceType    PracticeSourceType
+  practiceMode  PracticeMode
+  status        PracticeSessionStatus @default(IN_PROGRESS)
+  currentIndex  Int                   @default(0)
+  totalCount    Int
+  submittedCount Int                  @default(0)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  completedAt   DateTime?
+  lastAccessedAt DateTime             @default(now())
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bank          QuestionBank          @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  items         PracticeSessionItem[]
+  attempts      PracticeAttempt[]
+
+  @@index([userId, bankId, sourceType, status])
+  @@index([userId, status, lastAccessedAt])
+}
+
+model PracticeSessionItem {
+  id         String          @id @default(cuid())
+  sessionId  String
+  questionId String
+  sequence   Int
+  session    PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question   Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  attempts   PracticeAttempt[]
+
+  @@unique([sessionId, sequence])
+  @@unique([sessionId, questionId])
+  @@index([sessionId, sequence])
+}
+
+model PracticeAttempt {
+  id              String              @id @default(cuid())
+  sessionId       String
+  sessionItemId   String
+  userId          String
+  bankId          String
+  questionId      String
+  selectedAnswers Json
+  isCorrect       Boolean
+  submittedAt     DateTime            @default(now())
+  session         PracticeSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionItem     PracticeSessionItem @relation(fields: [sessionItemId], references: [id], onDelete: Cascade)
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question        Question            @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, bankId, submittedAt])
+  @@index([sessionId, questionId])
+}
+
+model UserQuestionStat {
+  id                           String       @id @default(cuid())
+  userId                       String
+  bankId                       String
+  questionId                   String
+  totalAttempts                Int          @default(0)
+  correctAttempts              Int          @default(0)
+  consecutiveCorrectInWrongBook Int         @default(0)
+  isInWrongBook                Boolean      @default(false)
+  lastResultCorrect            Boolean?
+  lastAnsweredAt               DateTime?
+  createdAt                    DateTime     @default(now())
+  updatedAt                    DateTime     @updatedAt
+  user                         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bank                         QuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  question                     Question     @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bankId, questionId])
+  @@index([userId, bankId, isInWrongBook])
+  @@index([userId, bankId, lastAnsweredAt])
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        JobType
+  status      JobStatus @default(PENDING)
+  payload     Json
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  availableAt DateTime  @default(now())
+  lockedAt    DateTime?
+  lockedBy    String?
+  finishedAt  DateTime?
+  lastError   String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, availableAt, createdAt])
+  @@index([type, status, availableAt])
+}

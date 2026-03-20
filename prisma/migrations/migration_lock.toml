@@ -1,0 +1,2 @@
+# 此文件用于锁定 Prisma 的迁移提供方，避免不同环境生成不一致的迁移结构。
+provider = "postgresql"

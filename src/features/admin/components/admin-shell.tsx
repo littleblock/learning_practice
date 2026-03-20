@@ -1,0 +1,85 @@
+import Link from "next/link";
+
+import { AdminLogoutButton } from "@/features/admin/components/admin-logout-button";
+import { APP_NAME } from "@/shared/constants/app";
+
+interface AdminShellProps {
+  activeKey: "banks" | "questions" | "statutes";
+  userName: string;
+  bankId?: string;
+  children: React.ReactNode;
+}
+
+function NavLink({
+  href,
+  label,
+  active,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link href={href} className={active ? "admin-side-link is-active" : "admin-side-link"}>
+      {label}
+    </Link>
+  );
+}
+
+export function AdminShell({ activeKey, userName, bankId, children }: AdminShellProps) {
+  return (
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-brand">
+          <div className="admin-brand-head">
+            <span className="admin-brand-icon" aria-hidden="true">
+              ⚖️
+            </span>
+            <div className="admin-brand-copy">
+              <h1>{APP_NAME}</h1>
+              <p className="admin-brand-label">后台管理</p>
+            </div>
+          </div>
+          <span>统一维护题库、题目和法条资料</span>
+        </div>
+
+        <nav className="admin-side-nav">
+          <NavLink href="/admin/banks" label="题库管理" active={activeKey === "banks"} />
+          {bankId ? (
+            <>
+              <NavLink
+                href={`/admin/banks/${bankId}/questions`}
+                label="题目管理"
+                active={activeKey === "questions"}
+              />
+              <NavLink
+                href={`/admin/banks/${bankId}/statutes`}
+                label="法条资料管理"
+                active={activeKey === "statutes"}
+              />
+            </>
+          ) : null}
+        </nav>
+
+        <div className="admin-sidebar-footer">
+          <div className="admin-account-card">
+            <div className="admin-account-main">
+              <div className="admin-account-info">
+                <span className="admin-account-icon" aria-hidden="true">
+                  👤
+                </span>
+                <div className="admin-account-meta">
+                  <span>管理员</span>
+                  <strong>{userName}</strong>
+                </div>
+              </div>
+              <AdminLogoutButton compact />
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div className="admin-content">{children}</div>
+    </div>
+  );
+}
