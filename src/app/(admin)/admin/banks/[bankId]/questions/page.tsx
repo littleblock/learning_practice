@@ -28,16 +28,31 @@ export default async function AdminQuestionsPage({
   });
 
   if (!bank) {
-    return <div>题库不存在。</div>;
+    return (
+      <AdminShell activeKey="banks" userName={session.user.displayName}>
+        <section className="admin-panel admin-page-panel" style={{ padding: 28 }}>
+          <div className="mobile-page-header">
+            <h1>题库不存在</h1>
+            <p>当前题库可能已被删除或无权访问，请返回题库列表重新选择。</p>
+          </div>
+          <div className="inline-actions">
+            <Link href="/admin/banks" className="admin-secondary-link">
+              返回题库列表
+            </Link>
+          </div>
+        </section>
+      </AdminShell>
+    );
   }
 
   const keyword = typeof query.keyword === "string" ? query.keyword : "";
   const type = typeof query.type === "string" ? query.type : "";
   const lawSource = typeof query.lawSource === "string" ? query.lawSource : "";
   const activeTab =
-    query.tab === "imports" || query.tab === "questions" ? query.tab : "questions";
-  const recordPage =
-    typeof query.recordPage === "string" ? query.recordPage : "1";
+    query.tab === "imports" || query.tab === "questions"
+      ? query.tab
+      : "questions";
+  const recordPage = typeof query.recordPage === "string" ? query.recordPage : "1";
   const recordPageSize =
     typeof query.recordPageSize === "string" ? query.recordPageSize : "10";
 

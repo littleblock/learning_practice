@@ -1,4 +1,4 @@
-import {
+﻿import {
   JobType,
   Prisma,
   QuestionImportBatchStatus,
@@ -63,6 +63,7 @@ interface ParsedWorkbookResult {
 
 const aiChunkRowLimit = 4;
 const aiChunkTextLimit = 2500;
+const questionCreateChunkSize = 200;
 
 const standardTemplateColumns = [
   { key: "question_type", label: "题型" },
@@ -406,6 +407,94 @@ function normalizeDraftSortOrders(
   });
 }
 
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+function tryParseSingleRowFallback(
+  row: SheetRow,
+  sortOrder: number,
+): QuestionImportDraftInput | null {
+  const cells = row.values.map((value) => value.trim()).filter(Boolean);
+  if (cells.length < 5) {
+    return null;
+  }
+
+  let questionType: ReturnType<typeof normalizeImportQuestionTypeValue>;
+  try {
+    questionType = normalizeImportQuestionTypeValue(cells[0]);
+  } catch {
+    return null;
+  }
+
+  let stemIndex = 1;
+  while (stemIndex < cells.length && cells[stemIndex].length < 5) {
+    stemIndex += 1;
+  }
+
+  if (stemIndex >= cells.length - 3) {
+    return null;
+  }
+
+  const stem = cells[stemIndex];
+  const tailCells = cells.slice(stemIndex + 1);
+  let lawSource: string | undefined;
+  let candidateCells = tailCells;
+
+  const lastCell = candidateCells.at(-1);
+  if (lastCell && looksLikeLawSource(lastCell)) {
+    lawSource = lastCell;
+    candidateCells = candidateCells.slice(0, -1);
+  }
+
+  if (candidateCells.length < 3 || candidateCells.length > 7) {
+    return null;
+  }
+
+  const correctAnswer = candidateCells.at(-1);
+  if (!correctAnswer) {
+    return null;
+  }
+
+  const optionValues = candidateCells.slice(0, -1);
+  if (optionValues.length < 2 || optionValues.length > 6) {
+    return null;
+  }
+
+  const record = questionImportRowSchema.parse({
+    question_type: questionType,
+    stem,
+    option_a: optionValues[0],
+    option_b: optionValues[1],
+    option_c: optionValues[2],
+    option_d: optionValues[3],
+    option_e: optionValues[4],
+    option_f: optionValues[5],
+    correct_answer: correctAnswer,
+    law_source: lawSource,
+    sort_order: sortOrder,
+  });
+
+  const normalized = normalizeQuestionInput({
+    ...mapImportRowToQuestionInput(record),
+    sortOrder,
+  });
+
+  return questionImportDraftSchema.parse({
+    ...normalized,
+    sortOrder,
+    sourceLabel: buildSourceRowLabel([row.rowNumber]),
+    sourceContent: row.content,
+    sourceRowNumbers: [row.rowNumber],
+  });
+}
+
 function buildSourceRowStatuses(
   rows: SheetRow[],
   drafts: QuestionImportDraftInput[],
@@ -583,6 +672,22 @@ async function parseAiChunkRows(
     }
 
     if (rows.length === 1) {
+      const fallbackDraft = tryParseSingleRowFallback(rows[0], startingSortOrder);
+      if (fallbackDraft) {
+        logger.warn(
+          {
+            rowNumber: rows[0].rowNumber,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+          "AI 单行拆题失败，已回退到本地兜底解析",
+        );
+
+        return {
+          drafts: [fallbackDraft],
+          failedRows: [],
+        };
+      }
+
       return {
         drafts: [],
         failedRows: [
@@ -854,89 +959,172 @@ export async function confirmQuestionImportBatch(
   batchId: string,
   userId: string,
 ) {
-  const result = await prisma.$transaction(async (tx) => {
-    const batch = await tx.questionImportBatch.findUnique({
-      where: { id: batchId },
-      include: {
-        drafts: {
-          where: {
-            isDeleted: false,
-          },
-          orderBy: {
-            sortOrder: "asc",
-          },
-        },
-      },
-    });
-
-    if (!batch) {
-      throw new Error("导题批次不存在");
-    }
-
-    if (batch.status !== QuestionImportBatchStatus.READY) {
-      throw new Error("当前批次不允许确认导入");
-    }
-
-    if (batch.drafts.length === 0) {
-      throw new Error("当前批次没有可导入的题目草稿");
-    }
-
-    const questionIds: string[] = [];
-
-    for (const draft of batch.drafts) {
-      const payload = normalizeQuestionInput(
-        questionImportDraftSchema.parse({
-          type: draft.type,
-          stem: draft.stem,
-          options: questionOptionSchema.array().parse(draft.options),
-          correctAnswers: parseStringArray(draft.correctAnswers),
-          analysis: draft.analysis,
-          lawSource: draft.lawSource,
-          sortOrder: draft.sortOrder,
-          sourceLabel: draft.sourceLabel,
-          sourceContent: draft.sourceContent,
-          sourceRowNumbers: parseNumberArray(draft.sourceRowNumbers),
-        }),
-      );
-
-      const question = await tx.question.upsert({
+  const batch = await prisma.questionImportBatch.findUnique({
+    where: { id: batchId },
+    include: {
+      drafts: {
         where: {
-          bankId_sortOrder: {
-            bankId: batch.bankId,
-            sortOrder: payload.sortOrder,
-          },
+          isDeleted: false,
         },
-        update: {
-          ...payload,
-          updatedById: userId,
+        orderBy: {
+          sortOrder: "asc",
         },
-        create: {
-          bankId: batch.bankId,
-          ...payload,
-          createdById: userId,
-          updatedById: userId,
-        },
-      });
-
-      questionIds.push(question.id);
-    }
-
-    await tx.questionImportBatch.update({
-      where: { id: batchId },
-      data: {
-        status: QuestionImportBatchStatus.CONFIRMED,
-        confirmedAt: new Date(),
-        lastError: null,
       },
-    });
+    },
+  });
+
+  if (!batch) {
+    throw new Error("导题批次不存在");
+  }
+
+  if (batch.status !== QuestionImportBatchStatus.READY) {
+    throw new Error("当前批次不允许确认导入");
+  }
+
+  if (batch.drafts.length === 0) {
+    throw new Error("当前批次没有可导入的题目草稿");
+  }
+
+  const existingQuestions = await prisma.question.findMany({
+    where: {
+      bankId: batch.bankId,
+    },
+    select: {
+      sortOrder: true,
+    },
+  });
+  const usedSortOrders = new Set(existingQuestions.map((item) => item.sortOrder));
+  let nextSortOrder =
+    existingQuestions.reduce(
+      (maxValue, item) => Math.max(maxValue, item.sortOrder),
+      0,
+    ) + 1;
+
+  const preparedDrafts = batch.drafts.map((draft) => {
+    const payload = normalizeQuestionInput(
+      questionImportDraftSchema.parse({
+        type: draft.type,
+        stem: draft.stem,
+        options: questionOptionSchema.array().parse(draft.options),
+        correctAnswers: parseStringArray(draft.correctAnswers),
+        analysis: draft.analysis,
+        lawSource: draft.lawSource,
+        sortOrder: draft.sortOrder,
+        sourceLabel: draft.sourceLabel,
+        sourceContent: draft.sourceContent,
+        sourceRowNumbers: parseNumberArray(draft.sourceRowNumbers),
+      }),
+    );
+
+    let finalSortOrder = payload.sortOrder;
+    if (finalSortOrder <= 0 || usedSortOrders.has(finalSortOrder)) {
+      while (usedSortOrders.has(nextSortOrder)) {
+        nextSortOrder += 1;
+      }
+      finalSortOrder = nextSortOrder;
+      nextSortOrder += 1;
+    }
+    usedSortOrders.add(finalSortOrder);
 
     return {
-      bankId: batch.bankId,
-      questionIds,
+      draftId: draft.id,
+      originalSortOrder: draft.sortOrder,
+      finalSortOrder,
+      sourceRowNumbers: parseNumberArray(draft.sourceRowNumbers),
+      createData: {
+        bankId: batch.bankId,
+        ...payload,
+        sortOrder: finalSortOrder,
+        createdById: userId,
+        updatedById: userId,
+      },
     };
   });
 
+  const matchedSortOrderMap = new Map<number, number[]>();
+  for (const draft of preparedDrafts) {
+    for (const rowNumber of draft.sourceRowNumbers) {
+      const matchedSortOrders = matchedSortOrderMap.get(rowNumber) ?? [];
+      matchedSortOrders.push(draft.finalSortOrder);
+      matchedSortOrderMap.set(rowNumber, matchedSortOrders);
+    }
+  }
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const locked = await tx.questionImportBatch.updateMany({
+        where: {
+          id: batchId,
+          status: QuestionImportBatchStatus.READY,
+        },
+        data: {
+          status: QuestionImportBatchStatus.PROCESSING,
+        },
+      });
+
+      if (locked.count === 0) {
+        throw new Error("当前批次不允许确认导入");
+      }
+
+      const questionIds: string[] = [];
+      for (const chunk of chunkArray(preparedDrafts, questionCreateChunkSize)) {
+        const createdQuestions = await tx.question.createManyAndReturn({
+          data: chunk.map((item) => item.createData),
+          select: {
+            id: true,
+          },
+        });
+        questionIds.push(...createdQuestions.map((item) => item.id));
+      }
+
+      await tx.questionImportBatch.update({
+        where: { id: batchId },
+        data: {
+          status: QuestionImportBatchStatus.CONFIRMED,
+          confirmedAt: new Date(),
+          lastError: null,
+        },
+      });
+
+      return {
+        bankId: batch.bankId,
+        questionIds,
+      };
+    },
+    {
+      maxWait: 10_000,
+      timeout: 120_000,
+    },
+  );
+
   try {
+    for (const draft of preparedDrafts) {
+      if (draft.finalSortOrder !== draft.originalSortOrder) {
+        await prisma.questionImportDraft.update({
+          where: {
+            id: draft.draftId,
+          },
+          data: {
+            sortOrder: draft.finalSortOrder,
+          },
+        });
+      }
+    }
+
+    for (const [rowNumber, matchedSortOrders] of matchedSortOrderMap) {
+      await prisma.questionImportSourceRow.updateMany({
+        where: {
+          batchId,
+          rowNumber,
+        },
+        data: {
+          matchedSortOrders: Array.from(new Set(matchedSortOrders)).sort(
+            (left, right) => left - right,
+          ),
+        },
+      });
+    }
+
     for (const questionId of result.questionIds) {
       await refreshQuestionEmbedding(questionId);
     }

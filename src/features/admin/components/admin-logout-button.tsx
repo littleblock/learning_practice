@@ -3,21 +3,36 @@
 import { LogoutOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState } from "react";
 
 export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-    });
+    if (isSubmitting) {
+      return;
+    }
 
-    startTransition(() => {
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        window.alert("退出登录失败，请稍后重试");
+        return;
+      }
+
       router.replace("/admin/login");
       router.refresh();
-    });
+    } catch {
+      window.alert("退出登录失败，请稍后重试");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -27,7 +42,7 @@ export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
       icon={<LogoutOutlined />}
       aria-label="退出登录"
       className={compact ? "admin-logout-button is-compact" : "admin-logout-button"}
-      loading={isPending}
+      loading={isSubmitting}
       onClick={handleLogout}
     >
       {compact ? null : "退出登录"}

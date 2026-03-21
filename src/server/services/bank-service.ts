@@ -163,7 +163,12 @@ export async function listMobileBankSummaries(
 }
 
 export async function getBankSetup(bankId: string) {
-  return getBankById(bankId);
+  const bank = await getBankById(bankId);
+  if (!bank || bank.status !== BankStatus.ACTIVE) {
+    return null;
+  }
+
+  return bank;
 }
 
 export async function assertBankExists(bankId: string) {
@@ -187,6 +192,9 @@ export async function listWrongBookSummaries(
       where: {
         userId,
         isInWrongBook: true,
+        bank: {
+          status: BankStatus.ACTIVE,
+        },
       },
       include: {
         bank: {
@@ -205,6 +213,9 @@ export async function listWrongBookSummaries(
         userId,
         sourceType: PracticeSourceType.WRONG_BOOK,
         status: "IN_PROGRESS",
+        bank: {
+          status: BankStatus.ACTIVE,
+        },
       },
       select: {
         id: true,
@@ -257,10 +268,6 @@ export async function listWrongBookSummaries(
 
 export async function listBanksForAdmin(rawQuery: unknown) {
   const query = bankListQuerySchema.parse(rawQuery);
-  const { skip, take, page, pageSize } = resolvePagination(
-    query.page,
-    query.pageSize,
-  );
 
   const where: Prisma.QuestionBankWhereInput = {
     ...(query.keyword
@@ -274,10 +281,17 @@ export async function listBanksForAdmin(rawQuery: unknown) {
     ...(query.status ? { status: query.status } : {}),
   };
 
-  const result = await listAdminBanks(where, skip, take);
+  const total = await prisma.questionBank.count({ where });
+  const { skip, take, page, pageSize } = resolvePagination(
+    query.page,
+    query.pageSize,
+    total,
+  );
+  const items = await listAdminBanks(where, skip, take);
 
   return {
-    ...result,
+    items,
+    total,
     page,
     pageSize,
   };

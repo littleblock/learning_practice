@@ -26,7 +26,7 @@ export default async function AdminBankEditPage({
 
   return (
     <AdminShell activeKey="banks" userName={session.user.displayName}>
-      <section className="admin-panel" style={{ padding: 24 }}>
+      <section className="admin-panel admin-page-panel" style={{ padding: 24 }}>
         {!bank ? (
           <div className="mobile-page-header">
             <h1>题库不存在</h1>
@@ -62,6 +62,22 @@ export default async function AdminBankEditPage({
                 当前页面仅允许修改题库名称、简介和排序值，题库编码保持只读。
               </p>
             </div>
+
+            <div className="admin-summary-grid">
+              <div className="admin-summary-card">
+                <span>当前编码</span>
+                <strong>{bank.code}</strong>
+              </div>
+              <div className="admin-summary-card">
+                <span>维护内容</span>
+                <strong>名称、简介、排序</strong>
+              </div>
+              <div className="admin-summary-card">
+                <span>快捷入口</span>
+                <strong>题目管理与法条资料</strong>
+              </div>
+            </div>
+
             <BankForm
               mode="edit"
               bankId={bank.id}

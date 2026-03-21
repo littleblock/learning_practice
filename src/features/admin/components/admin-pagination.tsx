@@ -54,20 +54,21 @@ export function AdminPagination({
   pageSizeParam = "pageSize",
 }: AdminPaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
 
   if (totalPages <= 1) {
     return null;
   }
 
-  const pageWindow = getPageWindow(page, totalPages);
+  const pageWindow = getPageWindow(safePage, totalPages);
 
   return (
     <div className="admin-pagination">
       <span>
-        第 {page} / {totalPages} 页，共 {total} 条
+        第 {safePage} / {totalPages} 页，共 {total} 条
       </span>
       <div className="inline-actions">
-        {page > 1 ? (
+        {safePage > 1 ? (
           <Link
             href={buildHref(
               basePath,
@@ -81,11 +82,11 @@ export function AdminPagination({
             首页
           </Link>
         ) : null}
-        {page > 1 ? (
+        {safePage > 1 ? (
           <Link
             href={buildHref(
               basePath,
-              page - 1,
+              safePage - 1,
               pageSize,
               query,
               pageParam,
@@ -96,7 +97,7 @@ export function AdminPagination({
           </Link>
         ) : null}
         {pageWindow.map((item) =>
-          item === page ? (
+          item === safePage ? (
             <span key={item} className="admin-pagination-current">
               {item}
             </span>
@@ -116,11 +117,11 @@ export function AdminPagination({
             </Link>
           ),
         )}
-        {page < totalPages ? (
+        {safePage < totalPages ? (
           <Link
             href={buildHref(
               basePath,
-              page + 1,
+              safePage + 1,
               pageSize,
               query,
               pageParam,
@@ -130,7 +131,7 @@ export function AdminPagination({
             下一页
           </Link>
         ) : null}
-        {page < totalPages ? (
+        {safePage < totalPages ? (
           <Link
             href={buildHref(
               basePath,

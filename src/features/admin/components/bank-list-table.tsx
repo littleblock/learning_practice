@@ -23,7 +23,7 @@ function getStatusLabel(status: BankStatus) {
 export function BankListTable({ banks }: BankListTableProps) {
   return (
     <div className="admin-table-wrap" style={{ marginTop: 18 }}>
-      <table className="admin-table">
+      <table className="admin-table is-bank-table">
         <thead>
           <tr>
             <th>名称</th>

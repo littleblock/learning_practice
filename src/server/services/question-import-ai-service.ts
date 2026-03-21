@@ -1,4 +1,4 @@
-import { QuestionType } from "@prisma/client";
+﻿import { QuestionType } from "@prisma/client";
 import { z } from "zod";
 
 import {
@@ -33,7 +33,7 @@ const aiQuestionDraftSchema = z.object({
     .min(1),
   analysis: z.string().trim().nullable().optional(),
   lawSource: z.string().trim().nullable().optional(),
-  sortOrder: z.number().int().min(1).optional(),
+  sortOrder: z.union([z.number().int().min(1), z.string().trim().min(1)]).optional(),
   sourceLabel: z.string().trim().nullable().optional(),
   sourceContent: z.string().trim().nullable().optional(),
   sourceRowNumbers: z
@@ -235,6 +235,25 @@ function normalizeSourceRowNumbers(
   ).sort((left, right) => left - right);
 }
 
+function normalizeSortOrderValue(
+  value: z.infer<typeof aiQuestionDraftSchema>["sortOrder"],
+  fallbackSortOrder: number,
+) {
+  if (typeof value === "number") {
+    return value >= fallbackSortOrder ? value : fallbackSortOrder;
+  }
+
+  if (typeof value === "string") {
+    const matched = value.match(/\d+/);
+    const parsed = matched ? Number.parseInt(matched[0], 10) : Number.NaN;
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed >= fallbackSortOrder ? parsed : fallbackSortOrder;
+    }
+  }
+
+  return fallbackSortOrder;
+}
+
 function normalizeQuestionDrafts(
   payload: z.infer<typeof aiQuestionDraftEnvelopeSchema>,
   rows: AiSourceRowInput[],
@@ -269,7 +288,7 @@ function normalizeQuestionDrafts(
       throw new Error("AI 返回的正确答案无法匹配到选项");
     }
 
-    const sortOrder = draft.sortOrder ?? nextSortOrder;
+    const sortOrder = normalizeSortOrderValue(draft.sortOrder, nextSortOrder);
     nextSortOrder = Math.max(nextSortOrder, sortOrder) + 1;
 
     return questionImportDraftSchema.parse({
@@ -315,11 +334,16 @@ export async function splitQuestionsWithAi(
   assertQuestionSplitConfigured();
   const env = getServerEnv();
   const chunkText = buildChunkText(rows);
+  const requestTimeoutMs =
+    rows.length === 1
+      ? Math.max(env.AI_SPLIT_TIMEOUT_MS, 90000)
+      : env.AI_SPLIT_TIMEOUT_MS;
+  const maxTokens = rows.length === 1 ? 1024 : 4096;
 
   const requestBody = {
     model: env.AI_SPLIT_MODEL,
     temperature: 0.1,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     messages: [
       {
         role: "system",
@@ -349,10 +373,7 @@ export async function splitQuestionsWithAi(
 
   for (let attempt = 1; attempt <= env.AI_SPLIT_MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      env.AI_SPLIT_TIMEOUT_MS,
-    );
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
     try {
       const response = await fetch(
@@ -392,7 +413,7 @@ export async function splitQuestionsWithAi(
       );
       return normalizeQuestionDrafts(parsed, rows, startingSortOrder);
     } catch (error) {
-      const normalizedError = normalizeFetchError(error, env.AI_SPLIT_TIMEOUT_MS);
+      const normalizedError = normalizeFetchError(error, requestTimeoutMs);
       logger.error(
         {
           attempt,

@@ -44,28 +44,31 @@ async function extractDocumentText(storagePath: string, fileName: string) {
 
 export async function listStatuteDocuments(bankId: string, rawQuery: unknown) {
   const query = statuteListQuerySchema.parse(rawQuery);
-  const { page, pageSize, skip, take } = resolvePagination(query.page, query.pageSize);
+  const where = { bankId };
+  const total = await prisma.statuteDocument.count({ where });
+  const { page, pageSize, skip, take } = resolvePagination(
+    query.page,
+    query.pageSize,
+    total,
+  );
 
-  const [items, total] = await prisma.$transaction([
-    prisma.statuteDocument.findMany({
-      where: { bankId },
-      orderBy: {
-        createdAt: "desc",
-      },
-      skip,
-      take,
-      select: {
-        id: true,
-        title: true,
-        fileName: true,
-        fileSize: true,
-        status: true,
-        lastError: true,
-        createdAt: true,
-      },
-    }),
-    prisma.statuteDocument.count({ where: { bankId } }),
-  ]);
+  const items = await prisma.statuteDocument.findMany({
+    where,
+    orderBy: {
+      createdAt: "desc",
+    },
+    skip,
+    take,
+    select: {
+      id: true,
+      title: true,
+      fileName: true,
+      fileSize: true,
+      status: true,
+      lastError: true,
+      createdAt: true,
+    },
+  });
 
   return {
     items: items.map(

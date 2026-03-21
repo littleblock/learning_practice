@@ -85,6 +85,10 @@ export function QuestionManager({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function deleteQuestion(questionId: string) {
+    if (!window.confirm("删除题目后将同步刷新匹配结果，确认删除吗？")) {
+      return;
+    }
+
     setDeletingId(questionId);
     setDeleteError(null);
 
@@ -204,7 +208,7 @@ export function QuestionManager({
                     </div>
                   ) : (
                     <div className="admin-table-wrap">
-                      <table className="admin-table">
+                      <table className="admin-table is-question-table">
                         <thead>
                           <tr>
                             <th>序号</th>
@@ -311,7 +315,7 @@ export function QuestionManager({
                     </div>
                   ) : (
                     <div className="admin-table-wrap">
-                      <table className="admin-table">
+                      <table className="admin-table is-import-table">
                         <thead>
                           <tr>
                             <th>文件名</th>

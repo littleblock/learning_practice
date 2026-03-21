@@ -28,24 +28,23 @@ export async function getBankById(bankId: string) {
   });
 }
 
-export async function listAdminBanks(where: Prisma.QuestionBankWhereInput, skip: number, take: number) {
-  const [items, total] = await prisma.$transaction([
-    prisma.questionBank.findMany({
-      where,
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      skip,
-      take,
-      include: {
-        _count: {
-          select: {
-            questions: true,
-            statuteDocuments: true,
-          },
+export async function listAdminBanks(
+  where: Prisma.QuestionBankWhereInput,
+  skip: number,
+  take: number,
+) {
+  return prisma.questionBank.findMany({
+    where,
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    skip,
+    take,
+    include: {
+      _count: {
+        select: {
+          questions: true,
+          statuteDocuments: true,
         },
       },
-    }),
-    prisma.questionBank.count({ where }),
-  ]);
-
-  return { items, total };
+    },
+  });
 }

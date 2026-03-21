@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Noto_Sans_SC, Source_Code_Pro } from "next/font/google";
 import "antd/dist/reset.css";
-import "antd-mobile/es/global";
 
 import { Providers } from "@/app/providers";
 import { APP_NAME } from "@/shared/constants/app";

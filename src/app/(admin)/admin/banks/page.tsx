@@ -32,6 +32,21 @@ export default async function AdminBanksPage({
           </Link>
         </div>
 
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <span>当前题库数</span>
+            <strong>{result.total}</strong>
+          </div>
+          <div className="admin-summary-card">
+            <span>管理入口</span>
+            <strong>题目与法条资料</strong>
+          </div>
+          <div className="admin-summary-card">
+            <span>常用操作</span>
+            <strong>筛选、编辑、启停、进入下属页面</strong>
+          </div>
+        </div>
+
         <BankFilters keyword={keyword} status={status} />
 
         <p className="page-note" style={{ marginTop: 14 }}>

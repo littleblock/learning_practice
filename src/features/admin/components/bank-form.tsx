@@ -39,6 +39,10 @@ export function BankForm({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) {
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
     setIsSubmitting(true);
@@ -66,7 +70,9 @@ export function BankForm({
         },
       );
 
-      const payload = (await response.json()) as {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as {
         code?: string;
         message?: string;
       };
@@ -85,7 +91,9 @@ export function BankForm({
         setDescription("");
         setSortOrder(0);
         setSuccessMessage(
-          payload.code ? `题库已创建，编码为 ${payload.code}` : "题库已创建",
+          payload.code
+            ? `题库已创建，编码为 ${payload.code}`
+            : "题库已创建",
         );
       } else {
         setSuccessMessage(mode === "create" ? "题库已创建" : "题库信息已更新");
@@ -96,6 +104,8 @@ export function BankForm({
         router.replace(redirectTo);
       }
       router.refresh();
+    } catch {
+      setErrorMessage(mode === "create" ? "创建题库失败" : "更新题库失败");
     } finally {
       setIsSubmitting(false);
     }

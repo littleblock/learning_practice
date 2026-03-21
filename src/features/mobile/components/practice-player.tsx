@@ -1,9 +1,8 @@
 "use client";
 
 import { QuestionType } from "@prisma/client";
-import { Button, Selector, Toast } from "antd-mobile";
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 
 import type { PracticeSessionView } from "@/shared/types/domain";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
@@ -17,51 +16,82 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   const [selectedAnswers, setSelectedAnswers] = useState<string[]>(
     initialView.currentQuestion?.selectedAnswers ?? [],
   );
-  const [isPending, startTransition] = useTransition();
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
 
   useEffect(() => {
     setSelectedAnswers(view.currentQuestion?.selectedAnswers ?? []);
+    setFeedbackMessage("");
   }, [view]);
 
   async function submitAnswer() {
-    if (!view.currentQuestion) {
+    if (!view.currentQuestion || submitting) {
       return;
     }
 
-    const response = await fetch(`/api/mobile/sessions/${view.id}/submit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        selectedAnswers,
-      }),
-    });
+    setFeedbackMessage("");
+    setSubmitting(true);
 
-    const payload = (await response.json()) as PracticeSessionView & { message?: string };
+    try {
+      const response = await fetch(`/api/mobile/sessions/${view.id}/submit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          selectedAnswers,
+        }),
+      });
 
-    if (!response.ok) {
-      Toast.show({ icon: "fail", content: payload.message ?? "提交失败" });
-      return;
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as PracticeSessionView & {
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setFeedbackMessage(payload.message ?? "提交失败");
+        return;
+      }
+
+      setView(payload);
+    } catch {
+      setFeedbackMessage("提交失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
     }
-
-    setView(payload);
   }
 
   async function nextQuestion() {
-    const response = await fetch(`/api/mobile/sessions/${view.id}/next`, {
-      method: "POST",
-    });
-    const payload = (await response.json()) as PracticeSessionView & { message?: string };
-
-    if (!response.ok) {
-      Toast.show({ icon: "fail", content: payload.message ?? "进入下一题失败" });
+    if (advancing) {
       return;
     }
 
-    startTransition(() => {
+    setFeedbackMessage("");
+    setAdvancing(true);
+
+    try {
+      const response = await fetch(`/api/mobile/sessions/${view.id}/next`, {
+        method: "POST",
+      });
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as PracticeSessionView & {
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setFeedbackMessage(payload.message ?? "进入下一题失败");
+        return;
+      }
+
       setView(payload);
-    });
+    } catch {
+      setFeedbackMessage("进入下一题失败，请稍后重试。");
+    } finally {
+      setAdvancing(false);
+    }
   }
 
   if (!view.currentQuestion) {
@@ -72,11 +102,11 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
           <p>当前会话里已经没有待作答题目，可以返回题库列表继续新的练习。</p>
         </div>
         <div className="inline-actions">
-          <Link href="/m/banks">
-            <Button color="primary">返回题库列表</Button>
+          <Link href="/m/banks" className="mobile-button is-primary">
+            返回题库列表
           </Link>
-          <Link href="/m/wrong-books">
-            <Button>查看错题本</Button>
+          <Link href="/m/wrong-books" className="mobile-button">
+            查看错题本
           </Link>
         </div>
       </section>
@@ -87,12 +117,15 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   const hasSubmitted = view.currentQuestion.isCorrect !== null;
 
   return (
-    <div className="list-grid">
+    <div className={hasSubmitted ? "list-grid mobile-practice-layout" : "list-grid"}>
       <section className="mobile-panel" style={{ padding: 24 }}>
         <div className="mobile-page-header">
           <div className="inline-actions" style={{ marginBottom: 10 }}>
-            <Link href="/m/banks">
-              <Button size="small">返回题库列表</Button>
+            <Link href="/m/banks" className="mobile-button is-small">
+              返回题库列表
+            </Link>
+            <Link href="/m/wrong-books" className="mobile-button is-small">
+              错题本
             </Link>
           </div>
           <h1>{view.bankName}</h1>
@@ -105,29 +138,57 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
           <div style={{ color: "var(--brand-primary)", fontWeight: 700 }}>
             {getQuestionTypeLabel(view.currentQuestion.type)}
           </div>
-          <div style={{ fontSize: 18, lineHeight: 1.8 }}>{view.currentQuestion.stem}</div>
-          <Selector
-            options={view.currentQuestion.options.map((item) => ({
-              label: `${item.label}. ${item.text}`,
-              value: item.label,
-            }))}
-            multiple={multiple}
-            value={selectedAnswers}
-            onChange={(value) => {
-              setSelectedAnswers(multiple ? value : value.slice(-1));
-            }}
-            disabled={hasSubmitted}
-          />
+          <div style={{ fontSize: 18, lineHeight: 1.8 }}>
+            {view.currentQuestion.stem}
+          </div>
+          <div className="mobile-choice-grid">
+            {view.currentQuestion.options.map((item) => {
+              const isActive = selectedAnswers.includes(item.label);
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  className={
+                    isActive
+                      ? "mobile-choice-button is-active"
+                      : "mobile-choice-button"
+                  }
+                  onClick={() => {
+                    if (hasSubmitted) {
+                      return;
+                    }
+
+                    if (multiple) {
+                      setSelectedAnswers((current) =>
+                        current.includes(item.label)
+                          ? current.filter((answer) => answer !== item.label)
+                          : [...current, item.label],
+                      );
+                      return;
+                    }
+
+                    setSelectedAnswers([item.label]);
+                  }}
+                  disabled={hasSubmitted}
+                >
+                  {item.label}. {item.text}
+                </button>
+              );
+            })}
+          </div>
+          {feedbackMessage ? (
+            <div className="mobile-feedback is-error">{feedbackMessage}</div>
+          ) : null}
           {!hasSubmitted ? (
-            <Button
-              block
-              color="primary"
+            <button
+              type="button"
+              className="mobile-button is-primary is-block"
               disabled={selectedAnswers.length === 0}
-              loading={isPending}
+              aria-busy={submitting}
               onClick={submitAnswer}
             >
-              提交答案
-            </Button>
+              {submitting ? "提交中..." : "提交答案"}
+            </button>
           ) : null}
         </div>
       </section>
@@ -137,13 +198,19 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
           <div style={{ display: "grid", gap: 12 }}>
             <div>
               <strong>本题结果：</strong>
-              <span style={{ color: view.currentQuestion.isCorrect ? "var(--success)" : "var(--danger)" }}>
+              <span
+                style={{
+                  color: view.currentQuestion.isCorrect
+                    ? "var(--success)"
+                    : "var(--danger)",
+                }}
+              >
                 {view.currentQuestion.isCorrect ? "回答正确" : "回答错误"}
               </span>
             </div>
             <div>
               <strong>你的答案：</strong>
-              {view.currentQuestion.selectedAnswers.join("、")}
+              {view.currentQuestion.selectedAnswers.join("、") || "未作答"}
             </div>
             <div>
               <strong>正确答案：</strong>
@@ -161,12 +228,21 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               <strong>匹配法条片段：</strong>
               {view.currentQuestion.matchedExcerpt || "暂未匹配到法条内容"}
             </div>
+            {feedbackMessage ? (
+              <div className="mobile-feedback is-error">{feedbackMessage}</div>
+            ) : null}
             <div className="inline-actions">
-              <Button color="primary" onClick={nextQuestion} loading={isPending}>
-                下一题
-              </Button>
-              <Link href="/m/banks">
-                <Button>返回题库列表</Button>
+              <button
+                type="button"
+                className="mobile-button is-primary"
+                onClick={nextQuestion}
+                disabled={advancing}
+                aria-busy={advancing}
+              >
+                {advancing ? "加载中..." : "下一题"}
+              </button>
+              <Link href="/m/banks" className="mobile-button">
+                返回题库列表
               </Link>
             </div>
           </div>

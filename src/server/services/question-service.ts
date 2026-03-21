@@ -15,10 +15,6 @@ import { normalizeQuestionInput } from "@/server/services/question-payload";
 
 export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
   const query = questionListQuerySchema.parse(rawQuery);
-  const { skip, take, page, pageSize } = resolvePagination(
-    query.page,
-    query.pageSize,
-  );
 
   const where: Prisma.QuestionWhereInput = {
     bankId,
@@ -41,35 +37,7 @@ export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
       : {}),
   };
 
-  const [items, total, aggregate] = await prisma.$transaction([
-    prisma.question.findMany({
-      where,
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      skip,
-      take,
-      select: {
-        id: true,
-        type: true,
-        stem: true,
-        options: true,
-        correctAnswers: true,
-        analysis: true,
-        lawSource: true,
-        sortOrder: true,
-        createdAt: true,
-        updatedAt: true,
-        createdBy: {
-          select: {
-            displayName: true,
-          },
-        },
-        updatedBy: {
-          select: {
-            displayName: true,
-          },
-        },
-      },
-    }),
+  const [total, aggregate] = await prisma.$transaction([
     prisma.question.count({ where }),
     prisma.question.aggregate({
       where: { bankId },
@@ -78,6 +46,40 @@ export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
       },
     }),
   ]);
+  const { skip, take, page, pageSize } = resolvePagination(
+    query.page,
+    query.pageSize,
+    total,
+  );
+
+  const items = await prisma.question.findMany({
+    where,
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    skip,
+    take,
+    select: {
+      id: true,
+      type: true,
+      stem: true,
+      options: true,
+      correctAnswers: true,
+      analysis: true,
+      lawSource: true,
+      sortOrder: true,
+      createdAt: true,
+      updatedAt: true,
+      createdBy: {
+        select: {
+          displayName: true,
+        },
+      },
+      updatedBy: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  });
 
   return {
     items: items.map(

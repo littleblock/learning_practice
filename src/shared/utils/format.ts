@@ -46,7 +46,7 @@ const IMPORT_TEMPLATE_TYPE_LABELS: Record<string, string> = {
 
 export function getImportTemplateTypeLabel(type: string | null) {
   if (!type) {
-    return "-";
+    return "未记录";
   }
 
   return IMPORT_TEMPLATE_TYPE_LABELS[type] ?? type;
@@ -60,4 +60,15 @@ const IMPORT_SOURCE_STATUS_LABELS: Record<string, string> = {
 
 export function getImportSourceStatusLabel(status: string) {
   return IMPORT_SOURCE_STATUS_LABELS[status] ?? status;
+}
+
+const DOCUMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: "等待处理",
+  PROCESSING: "处理中",
+  READY: "可用",
+  FAILED: "处理失败",
+};
+
+export function getDocumentStatusLabel(status: string) {
+  return DOCUMENT_STATUS_LABELS[status] ?? status;
 }

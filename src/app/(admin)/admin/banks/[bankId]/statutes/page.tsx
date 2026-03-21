@@ -8,6 +8,7 @@ import { StatuteUploadForm } from "@/features/admin/components/statute-upload-fo
 import { requirePageRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import { listStatuteDocuments } from "@/server/services/statute-service";
+import { formatDateTime, getDocumentStatusLabel } from "@/shared/utils/format";
 
 export default async function AdminStatutesPage({
   params,
@@ -29,7 +30,21 @@ export default async function AdminStatutesPage({
   });
 
   if (!bank) {
-    return <div>题库不存在。</div>;
+    return (
+      <AdminShell activeKey="banks" userName={session.user.displayName}>
+        <section className="admin-panel admin-page-panel" style={{ padding: 28 }}>
+          <div className="mobile-page-header">
+            <h1>题库不存在</h1>
+            <p>当前题库可能已被删除或无权访问，请返回题库列表重新选择。</p>
+          </div>
+          <div className="inline-actions">
+            <Link href="/admin/banks" className="admin-secondary-link">
+              返回题库列表
+            </Link>
+          </div>
+        </section>
+      </AdminShell>
+    );
   }
 
   const documents = await listStatuteDocuments(bank.id, query);
@@ -37,7 +52,7 @@ export default async function AdminStatutesPage({
   return (
     <AdminShell activeKey="banks" userName={session.user.displayName}>
       <div className="list-grid">
-        <section className="admin-panel" style={{ padding: 24 }}>
+        <section className="admin-panel admin-page-panel" style={{ padding: 24 }}>
           <div className="mobile-page-header">
             <div className="inline-actions" style={{ marginBottom: 12 }}>
               <Link href="/admin/banks" className="admin-secondary-link">
@@ -76,7 +91,7 @@ export default async function AdminStatutesPage({
         </section>
 
         {documents.items.length === 0 ? (
-          <section className="admin-panel" style={{ padding: 24 }}>
+          <section className="admin-panel admin-page-panel" style={{ padding: 24 }}>
             当前还没有上传任何法条资料。
           </section>
         ) : null}
@@ -84,18 +99,22 @@ export default async function AdminStatutesPage({
         {documents.items.map((document) => (
           <section
             key={document.id}
-            className="admin-panel"
+            className="admin-panel admin-page-panel"
             style={{ padding: 24 }}
           >
             <div className="mobile-page-header">
               <h1 style={{ fontSize: 22 }}>{document.title}</h1>
               <p>
-                文件名：{document.fileName} | 状态：{document.status} | 大小：
-                {Math.ceil(document.fileSize / 1024)} KB
+                文件名：{document.fileName} | 状态：
+                {getDocumentStatusLabel(document.status)} | 大小：
+                {Math.ceil(document.fileSize / 1024)} KB | 上传时间：
+                {formatDateTime(document.createdAt)}
               </p>
             </div>
             {document.lastError ? (
-              <div style={{ color: "var(--danger)" }}>{document.lastError}</div>
+              <div style={{ color: "var(--danger)", marginBottom: 12 }}>
+                {document.lastError}
+              </div>
             ) : null}
             <DeleteDocumentButton documentId={document.id} />
           </section>

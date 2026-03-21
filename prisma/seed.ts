@@ -92,7 +92,7 @@ async function main() {
         { label: "F", text: "错误" },
       ],
       correctAnswers: ["T"],
-      analysis: "自愿原则是民法基本原则之一。",
+      analysis: "自愿原则是民法的基本原则之一。",
       lawSource: "《中华人民共和国民法典》总则编",
       sortOrder: 3,
     },

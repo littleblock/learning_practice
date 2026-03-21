@@ -1,6 +1,5 @@
 import { UserRole } from "@prisma/client";
 import Link from "next/link";
-import { Button } from "antd-mobile";
 
 import { requirePageRole } from "@/server/auth/guards";
 import { listMobileBankSummaries } from "@/server/services/bank-service";
@@ -8,17 +7,46 @@ import { listMobileBankSummaries } from "@/server/services/bank-service";
 export default async function MobileBanksPage() {
   const session = await requirePageRole(UserRole.LEARNER, "/m/login");
   const banks = await listMobileBankSummaries(session.user.id);
+  const totalQuestions = banks.reduce((sum, bank) => sum + bank.totalQuestions, 0);
+  const totalWrongQuestions = banks.reduce(
+    (sum, bank) => sum + bank.wrongBookCount,
+    0,
+  );
+  const resumableCount = banks.filter((bank) => bank.resumeSessionId).length;
 
   return (
     <div className="list-grid">
       <section className="mobile-page-header">
         <h1>题库列表</h1>
-        <p>你好，{session.user.displayName}。可以从这里开始新的练习，也可以继续上次进度。</p>
+        <p>
+          你好，{session.user.displayName}。可以从这里开始新的练习，也可以继续上次进度。
+        </p>
       </section>
 
-      <Link href="/m/wrong-books">
-        <Button block>进入错题本</Button>
-      </Link>
+      <div className="stats-grid mobile-overview-grid">
+        <div className="stat-card">
+          可用题库
+          <strong>{banks.length}</strong>
+        </div>
+        <div className="stat-card">
+          总题量
+          <strong>{totalQuestions}</strong>
+        </div>
+        <div className="stat-card">
+          待复习错题
+          <strong>{totalWrongQuestions}</strong>
+        </div>
+        <div className="stat-card">
+          可继续练习
+          <strong>{resumableCount}</strong>
+        </div>
+      </div>
+
+      <div className="inline-actions">
+        <Link href="/m/wrong-books" className="mobile-button">
+          进入错题本
+        </Link>
+      </div>
 
       {banks.length === 0 ? (
         <section className="mobile-panel" style={{ padding: 24 }}>
@@ -26,54 +54,65 @@ export default async function MobileBanksPage() {
         </section>
       ) : null}
 
-      {banks.map((bank) => (
-        <section key={bank.id} className="mobile-panel" style={{ padding: 20 }}>
-          <div className="mobile-page-header">
-            <h1 style={{ fontSize: 22 }}>{bank.name}</h1>
-            <p>{bank.description || "暂无题库简介"}</p>
-          </div>
+      <div className="mobile-card-grid">
+        {banks.map((bank) => (
+          <section key={bank.id} className="mobile-panel" style={{ padding: 20 }}>
+            <div className="mobile-page-header">
+              <h1 style={{ fontSize: 22 }}>{bank.name}</h1>
+              <p>{bank.description || "暂无题库简介"}</p>
+            </div>
 
-          <div className="stats-grid">
-            <div className="stat-card">
-              总题量
-              <strong>{bank.totalQuestions}</strong>
+            <div className="stats-grid">
+              <div className="stat-card">
+                总题量
+                <strong>{bank.totalQuestions}</strong>
+              </div>
+              <div className="stat-card">
+                已做题数
+                <strong>{bank.answeredQuestions}</strong>
+              </div>
+              <div className="stat-card">
+                正确率
+                <strong>{(bank.accuracyRate * 100).toFixed(0)}%</strong>
+              </div>
+              <div className="stat-card">
+                错题数
+                <strong>{bank.wrongBookCount}</strong>
+              </div>
             </div>
-            <div className="stat-card">
-              已做题数
-              <strong>{bank.answeredQuestions}</strong>
-            </div>
-            <div className="stat-card">
-              正确率
-              <strong>{(bank.accuracyRate * 100).toFixed(0)}%</strong>
-            </div>
-            <div className="stat-card">
-              错题数
-              <strong>{bank.wrongBookCount}</strong>
-            </div>
-          </div>
 
-          <div style={{ marginTop: 16 }}>
-            <div className="progress-row">
-              <span>练习进度</span>
-              <strong>{(bank.progressRate * 100).toFixed(0)}%</strong>
+            <div style={{ marginTop: 16 }}>
+              <div className="progress-row">
+                <span>练习进度</span>
+                <strong>{(bank.progressRate * 100).toFixed(0)}%</strong>
+              </div>
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${Math.min(bank.progressRate * 100, 100)}%` }}
+                />
+              </div>
             </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: `${Math.min(bank.progressRate * 100, 100)}%` }} />
-            </div>
-          </div>
 
-          <div style={{ marginTop: 16 }} className="inline-actions">
-            <Link href={`/m/banks/${bank.id}/setup`}>
-              <Button color="primary">进入题库</Button>
-            </Link>
-            {bank.resumeSessionId ? (
-              <Link href={`/m/practice/${bank.resumeSessionId}`}>
-                <Button>继续上次练习</Button>
+            <div style={{ marginTop: 16 }} className="inline-actions">
+              <Link
+                href={`/m/banks/${bank.id}/setup`}
+                className="mobile-button is-primary"
+              >
+                进入题库
               </Link>
-            ) : null}
-          </div>
-        </section>
-      ))}
+              {bank.resumeSessionId ? (
+                <Link
+                  href={`/m/practice/${bank.resumeSessionId}`}
+                  className="mobile-button"
+                >
+                  继续上次练习
+                </Link>
+              ) : null}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

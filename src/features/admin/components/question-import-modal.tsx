@@ -2,7 +2,7 @@
 
 import { Button, Modal, Pagination, Tabs } from "antd";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { QuestionImportBatchDetail } from "@/shared/types/domain";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
@@ -48,7 +48,9 @@ export function QuestionImportModal({
   const refreshBatch = useCallback(async (batchId: string) => {
     try {
       const response = await fetch(`/api/admin/questions/import/${batchId}`);
-      const payload = (await response.json()) as QuestionImportBatchDetail & {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as QuestionImportBatchDetail & {
         message?: string;
       };
 
@@ -65,8 +67,7 @@ export function QuestionImportModal({
       );
       setDraftPage(1);
       setSourceRowPage(1);
-    } catch (error) {
-      console.error("获取导题批次详情失败", error);
+    } catch {
       setErrorMessage("获取导题批次详情失败");
     }
   }, []);
@@ -106,8 +107,34 @@ export function QuestionImportModal({
     };
   }, [batch, open, refreshBatch]);
 
+  const allDraftIds = useMemo(
+    () => batch?.drafts.map((draft) => draft.id) ?? [],
+    [batch],
+  );
+  const isAllSelected =
+    allDraftIds.length > 0 && selectedDraftIds.length === allDraftIds.length;
+
+  const pagedDrafts = batch?.drafts.slice(
+    (draftPage - 1) * draftPageSize,
+    draftPage * draftPageSize,
+  );
+  const pagedSourceRows = batch?.sourceRows.slice(
+    (sourceRowPage - 1) * sourceRowPageSize,
+    sourceRowPage * sourceRowPageSize,
+  );
+
+  const canShowResultTabs =
+    !!batch &&
+    (["READY", "CONFIRMED", "FAILED"].includes(batch.status) ||
+      batch.drafts.length > 0 ||
+      batch.sourceRows.length > 0);
+
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isUploading) {
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -129,7 +156,9 @@ export function QuestionImportModal({
         body: formData,
       });
 
-      const payload = (await response.json()) as {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as {
         batchId?: string;
         message?: string;
       };
@@ -142,8 +171,7 @@ export function QuestionImportModal({
       onBatchChange?.();
       await refreshBatch(payload.batchId);
       setSuccessMessage("文件已上传，系统正在解析题目。");
-    } catch (error) {
-      console.error("创建导题批次失败", error);
+    } catch {
       setErrorMessage("创建导题批次失败");
     } finally {
       setIsUploading(false);
@@ -152,6 +180,10 @@ export function QuestionImportModal({
 
   async function handleDeleteDraft(draftId: string) {
     if (!batch) {
+      return;
+    }
+
+    if (!window.confirm("删除后该草稿将不会导入题库，确认删除吗？")) {
       return;
     }
 
@@ -166,7 +198,9 @@ export function QuestionImportModal({
           method: "DELETE",
         },
       );
-      const payload = (await response.json()) as QuestionImportBatchDetail & {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as QuestionImportBatchDetail & {
         message?: string;
       };
 
@@ -181,8 +215,7 @@ export function QuestionImportModal({
       );
       setDraftPage(1);
       onBatchChange?.();
-    } catch (error) {
-      console.error("删除草稿失败", error);
+    } catch {
       setErrorMessage("删除草稿失败");
     } finally {
       setIsMutating(false);
@@ -191,6 +224,14 @@ export function QuestionImportModal({
 
   async function handleDeleteSelected() {
     if (!batch || selectedDraftIds.length === 0) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `确认删除已选中的 ${selectedDraftIds.length} 条草稿吗？删除后将不会进入正式题库。`,
+      )
+    ) {
       return;
     }
 
@@ -212,7 +253,9 @@ export function QuestionImportModal({
         },
       );
 
-      const payload = (await response.json()) as QuestionImportBatchDetail & {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as QuestionImportBatchDetail & {
         message?: string;
       };
 
@@ -225,8 +268,7 @@ export function QuestionImportModal({
       setSelectedDraftIds([]);
       setDraftPage(1);
       onBatchChange?.();
-    } catch (error) {
-      console.error("批量删除草稿失败", error);
+    } catch {
       setErrorMessage("批量删除草稿失败");
     } finally {
       setIsMutating(false);
@@ -234,7 +276,15 @@ export function QuestionImportModal({
   }
 
   async function handleConfirmImport() {
-    if (!batch) {
+    if (!batch || batch.drafts.length === 0) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `确认将当前保留的 ${batch.drafts.length} 道题目导入正式题库吗？`,
+      )
+    ) {
       return;
     }
 
@@ -250,7 +300,9 @@ export function QuestionImportModal({
         },
       );
 
-      const payload = (await response.json()) as QuestionImportBatchDetail & {
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as QuestionImportBatchDetail & {
         message?: string;
       };
       if (!response.ok) {
@@ -263,32 +315,12 @@ export function QuestionImportModal({
       setSuccessMessage(`导入完成，共纳入 ${payload.draftCount} 道题目。`);
       onBatchChange?.();
       onSuccess();
-    } catch (error) {
-      console.error("确认导入失败", error);
+    } catch {
       setErrorMessage("确认导入失败");
     } finally {
       setIsMutating(false);
     }
   }
-
-  const allDraftIds = batch?.drafts.map((draft) => draft.id) ?? [];
-  const isAllSelected =
-    allDraftIds.length > 0 && selectedDraftIds.length === allDraftIds.length;
-
-  const pagedDrafts = batch?.drafts.slice(
-    (draftPage - 1) * draftPageSize,
-    draftPage * draftPageSize,
-  );
-  const pagedSourceRows = batch?.sourceRows.slice(
-    (sourceRowPage - 1) * sourceRowPageSize,
-    sourceRowPage * sourceRowPageSize,
-  );
-
-  const canShowResultTabs =
-    !!batch &&
-    (["READY", "CONFIRMED", "FAILED"].includes(batch.status) ||
-      batch.drafts.length > 0 ||
-      batch.sourceRows.length > 0);
 
   return (
     <Modal
@@ -297,22 +329,24 @@ export function QuestionImportModal({
       onCancel={onClose}
       footer={null}
       destroyOnHidden
-      width="min(1040px, calc(100vw - 48px))"
+      width="min(1160px, calc(100vw - 32px))"
       styles={{
         body: {
-          maxHeight: "72vh",
+          maxHeight: "74vh",
           overflow: "auto",
           paddingTop: 12,
         },
       }}
     >
       <div className="list-grid">
-        <form onSubmit={handleUpload} className="list-grid">
+        <form onSubmit={handleUpload} className="admin-modal-upload">
           <div className="page-note">
-            只有符合标准模板的文件才按规则解析，其他文件一律交给 AI 识别。每一行都会记录是否能形成题目。
+            只有符合标准模板的文件才按规则解析，其他文件统一交给 AI 识别。每一行都会记录是否能形成题目。
           </div>
           <div className="inline-actions">
-            <Link href="/api/admin/questions/import/template">下载标准模板</Link>
+            <Link href="/api/admin/questions/import/template">
+              下载标准模板
+            </Link>
             <input
               ref={fileInputRef}
               type="file"
@@ -334,16 +368,43 @@ export function QuestionImportModal({
         </form>
 
         {batch ? (
-          <section className="admin-empty-state">
-            <div>文件名：{batch.fileName}</div>
-            <div>解析方式：{getImportTemplateTypeLabel(batch.templateType)}</div>
-            <div>状态：{getBatchStatusLabel(batch.status)}</div>
-            <div>草稿数量：{batch.draftCount}</div>
-            <div>来源行数：{batch.sourceRows.length}</div>
-            <div>工作表：{batch.sourceSheetName || "-"}</div>
-            <div>上传时间：{formatDateTime(batch.createdAt)}</div>
-            <div>解析时间：{formatDateTime(batch.parsedAt)}</div>
-            <div>确认时间：{formatDateTime(batch.confirmedAt)}</div>
+          <section className="admin-summary-grid">
+            <div className="admin-summary-card">
+              <span>文件名</span>
+              <strong title={batch.fileName}>{truncateText(batch.fileName, 32)}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>解析方式</span>
+              <strong>{getImportTemplateTypeLabel(batch.templateType)}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>状态</span>
+              <strong>{getBatchStatusLabel(batch.status)}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>草稿数量</span>
+              <strong>{batch.draftCount}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>来源行数</span>
+              <strong>{batch.sourceRows.length}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>工作表</span>
+              <strong>{batch.sourceSheetName || "-"}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>上传时间</span>
+              <strong>{formatDateTime(batch.createdAt)}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>解析时间</span>
+              <strong>{formatDateTime(batch.parsedAt)}</strong>
+            </div>
+            <div className="admin-summary-card">
+              <span>确认时间</span>
+              <strong>{formatDateTime(batch.confirmedAt)}</strong>
+            </div>
           </section>
         ) : (
           <section className="admin-empty-state">
@@ -386,6 +447,7 @@ export function QuestionImportModal({
                         <Button
                           type="primary"
                           loading={isMutating}
+                          disabled={batch.drafts.length === 0}
                           onClick={() => void handleConfirmImport()}
                         >
                           确认导入 {batch?.draftCount ?? 0} 道题
@@ -394,13 +456,15 @@ export function QuestionImportModal({
                     ) : batch?.status === "CONFIRMED" ? (
                       <div className="page-note">当前批次已完成导入，以下结果为只读展示。</div>
                     ) : (
-                      <div className="page-note">当前批次没有可确认题目时，会在“来源行判定”中展示失败原因。</div>
+                      <div className="page-note">
+                        当前批次没有可确认题目时，会在“来源行判定”中展示失败原因。
+                      </div>
                     )}
 
                     {batch?.drafts.length ? (
                       <>
                         <div className="admin-table-wrap">
-                          <table className="admin-table">
+                          <table className="admin-table is-import-detail-table">
                             <thead>
                               <tr>
                                 <th style={{ width: 54 }}>选择</th>
@@ -457,7 +521,7 @@ export function QuestionImportModal({
                                       "-"}
                                   </td>
                                   <td>
-                                    {batch?.status === "READY" ? (
+                                    {batch.status === "READY" ? (
                                       <Button
                                         danger
                                         size="small"
@@ -500,7 +564,7 @@ export function QuestionImportModal({
                 children: batch?.sourceRows.length ? (
                   <div className="list-grid">
                     <div className="admin-table-wrap">
-                      <table className="admin-table">
+                      <table className="admin-table is-import-detail-table">
                         <thead>
                           <tr>
                             <th>行号</th>

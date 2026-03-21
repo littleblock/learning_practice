@@ -2,7 +2,7 @@
 
 import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 
 export function StatuteUploadForm({ bankId }: { bankId: string }) {
   const router = useRouter();
@@ -10,10 +10,14 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
   const [title, setTitle] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [isUploading, setIsUploading] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isUploading) {
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -28,25 +32,33 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
     formData.append("title", title || file.name);
     formData.append("file", file);
 
-    const response = await fetch("/api/admin/statutes/upload", {
-      method: "POST",
-      body: formData,
-    });
-    const payload = (await response.json()) as { message?: string };
+    setIsUploading(true);
 
-    if (!response.ok) {
-      setErrorMessage(payload.message ?? "上传失败");
-      return;
-    }
+    try {
+      const response = await fetch("/api/admin/statutes/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as { message?: string };
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-    setTitle("");
-    setSuccessMessage("资料已上传，系统会异步拆分文本并重建法条匹配结果。");
-    startTransition(() => {
+      if (!response.ok) {
+        setErrorMessage(payload.message ?? "上传失败");
+        return;
+      }
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      setTitle("");
+      setSuccessMessage("资料已上传，系统会异步拆分文本并重建法条匹配结果。");
       router.refresh();
-    });
+    } catch {
+      setErrorMessage("上传失败，请稍后重试");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   return (
@@ -63,7 +75,7 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
       {successMessage ? (
         <div style={{ color: "var(--success)" }}>{successMessage}</div>
       ) : null}
-      <Button htmlType="submit" type="primary" loading={isPending}>
+      <Button htmlType="submit" type="primary" loading={isUploading}>
         上传资料
       </Button>
     </form>

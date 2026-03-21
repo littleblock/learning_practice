@@ -21,7 +21,7 @@ function applyTestEnv() {
 }
 
 describe("question import ai service", () => {
-  it("接受模型返回的 null 字段并补齐来源行信息", async () => {
+  it("接受模型返回的空字段并补齐来源行信息", async () => {
     applyTestEnv();
 
     global.fetch = vi.fn().mockResolvedValue(
@@ -131,6 +131,60 @@ describe("question import ai service", () => {
         correctAnswers: ["D"],
         sourceRowNumbers: [3],
         sortOrder: 10,
+      },
+    ]);
+  });
+
+  it("兼容模型返回字符串排序号", async () => {
+    applyTestEnv();
+
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  {
+                    type: "single",
+                    stem: "这是一道用于校验字符串排序号的测试题目",
+                    options: [
+                      { label: "A", text: "选项A" },
+                      { label: "B", text: "选项B" },
+                    ],
+                    correctAnswers: ["1"],
+                    analysis: null,
+                    lawSource: null,
+                    sortOrder: "12",
+                    sourceLabel: null,
+                    sourceContent: null,
+                    sourceRowNumbers: [7],
+                  },
+                ]),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    ) as typeof global.fetch;
+
+    const { splitQuestionsWithAi } = await import(
+      "@/server/services/question-import-ai-service"
+    );
+
+    await expect(
+      splitQuestionsWithAi([{ rowNumber: 7, content: "测试内容三" }], 1),
+    ).resolves.toMatchObject([
+      {
+        stem: "这是一道用于校验字符串排序号的测试题目",
+        sortOrder: 12,
+        sourceRowNumbers: [7],
       },
     ]);
   });

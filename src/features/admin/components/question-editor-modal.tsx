@@ -1,8 +1,8 @@
 "use client";
 
 import { QuestionType } from "@prisma/client";
-import { Button, Input, Modal, Select, Space } from "antd";
-import { useEffect, useState } from "react";
+import { Button, Input, Modal, Select } from "antd";
+import { useEffect, useMemo, useState } from "react";
 
 import type { QuestionListItem } from "@/shared/types/domain";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
@@ -49,14 +49,15 @@ function toFormState(
   }
 
   const optionMap = new Map(
-    question.options.map((item) => [item.label, item.text]),
+    question.options.map((item) => [item.label.toUpperCase(), item.text]),
   );
+  const isJudge = question.type === QuestionType.JUDGE;
 
   return {
     type: question.type,
     stem: question.stem,
-    optionA: optionMap.get("A") ?? "",
-    optionB: optionMap.get("B") ?? "",
+    optionA: optionMap.get("A") ?? (isJudge ? optionMap.get("T") ?? "正确" : ""),
+    optionB: optionMap.get("B") ?? (isJudge ? optionMap.get("F") ?? "错误" : ""),
     optionC: optionMap.get("C") ?? "",
     optionD: optionMap.get("D") ?? "",
     optionE: optionMap.get("E") ?? "",
@@ -66,6 +67,23 @@ function toFormState(
     lawSource: question.lawSource ?? "",
     sortOrder: question.sortOrder,
   };
+}
+
+function normalizeJudgeAnswerToken(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  if (["A", "T", "TRUE", "正确", "对", "Y", "YES"].includes(normalized)) {
+    return "A";
+  }
+
+  if (["B", "F", "FALSE", "错误", "错", "N", "NO"].includes(normalized)) {
+    return "B";
+  }
+
+  return normalized;
 }
 
 export function QuestionEditorModal({
@@ -99,26 +117,44 @@ export function QuestionEditorModal({
     setErrorMessage("");
   }, [nextSortOrder, open, question]);
 
+  const optionLabels = useMemo(
+    () =>
+      formState.type === QuestionType.JUDGE
+        ? (["A", "B"] as const)
+        : (["A", "B", "C", "D", "E", "F"] as const),
+    [formState.type],
+  );
+
   async function handleSubmit() {
+    if (isSubmitting) {
+      return;
+    }
+
     setErrorMessage("");
     setIsSubmitting(true);
 
     try {
-      const options = ["A", "B", "C", "D", "E", "F"]
+      const options = optionLabels
         .map((label) => ({
           label,
           text: formState[`option${label}` as keyof QuestionFormState] as string,
         }))
         .filter((item) => item.text.trim().length > 0);
 
+      const correctAnswers = formState.correctAnswers
+        .split(/[\s,，；、/]+/)
+        .map((item) =>
+          formState.type === QuestionType.JUDGE
+            ? normalizeJudgeAnswerToken(item)
+            : item.trim().toUpperCase(),
+        )
+        .filter(Boolean);
+
       const payload = {
         type: formState.type,
         stem: formState.stem,
         options,
-        correctAnswers: formState.correctAnswers
-          .split(/[\s,，;；、|/]+/)
-          .map((item) => item.trim().toUpperCase())
-          .filter(Boolean),
+        correctAnswers,
         analysis: formState.analysis || null,
         lawSource: formState.lawSource || null,
         sortOrder: Number(formState.sortOrder),
@@ -137,7 +173,9 @@ export function QuestionEditorModal({
         body: JSON.stringify(payload),
       });
 
-      const result = (await response.json()) as { message?: string };
+      const result = (await response
+        .json()
+        .catch(() => ({}))) as { message?: string };
       if (!response.ok) {
         setErrorMessage(result.message ?? "保存题目失败");
         return;
@@ -145,8 +183,7 @@ export function QuestionEditorModal({
 
       onSuccess();
       onClose();
-    } catch (error) {
-      console.error("保存题目失败", error);
+    } catch {
       setErrorMessage("保存题目失败");
     } finally {
       setIsSubmitting(false);
@@ -160,9 +197,16 @@ export function QuestionEditorModal({
       onCancel={onClose}
       footer={null}
       destroyOnHidden
-      width={880}
+      width={920}
     >
       <div className="list-grid">
+        <div className="admin-modal-section">
+          <div className="admin-modal-section-title">基础信息</div>
+          <div className="page-note">
+            先确定题型、题干和排序，再补充选项、正确答案与解析。
+          </div>
+        </div>
+
         <Select
           value={formState.type}
           options={[
@@ -183,6 +227,18 @@ export function QuestionEditorModal({
             setFormState((current) => ({
               ...current,
               type: value as QuestionType,
+              optionA:
+                value === QuestionType.JUDGE
+                  ? current.optionA || "正确"
+                  : current.optionA,
+              optionB:
+                value === QuestionType.JUDGE
+                  ? current.optionB || "错误"
+                  : current.optionB,
+              correctAnswers:
+                value === QuestionType.JUDGE
+                  ? normalizeJudgeAnswerToken(current.correctAnswers || "A")
+                  : current.correctAnswers,
             }))
           }
         />
@@ -197,14 +253,33 @@ export function QuestionEditorModal({
             }))
           }
         />
-        <Space.Compact direction="vertical" style={{ width: "100%" }}>
-          {["A", "B", "C", "D", "E", "F"].map((label) => (
+        <Input
+          type="number"
+          placeholder="序号"
+          value={String(formState.sortOrder)}
+          onChange={(event) =>
+            setFormState((current) => ({
+              ...current,
+              sortOrder: Number(event.target.value || nextSortOrder),
+            }))
+          }
+        />
+
+        <div className="admin-modal-section">
+          <div className="admin-modal-section-title">选项与答案</div>
+          <div className="page-note">
+            {formState.type === QuestionType.JUDGE
+              ? "判断题仅保留两个选项，默认使用 A=正确、B=错误。正确答案可填写 A/B，也支持填写 正确/错误 或 T/F。"
+              : "正确答案可填写 A、B、C 等选项标识，多选题请用逗号分隔。"}
+          </div>
+        </div>
+
+        <div className="admin-option-grid">
+          {optionLabels.map((label) => (
             <Input
               key={label}
               placeholder={`选项 ${label}`}
-              value={
-                formState[`option${label}` as keyof QuestionFormState] as string
-              }
+              value={formState[`option${label}` as keyof QuestionFormState] as string}
               onChange={(event) =>
                 setFormState((current) => ({
                   ...current,
@@ -213,9 +288,13 @@ export function QuestionEditorModal({
               }
             />
           ))}
-        </Space.Compact>
+        </div>
         <Input
-          placeholder="正确答案，多个答案请用逗号分隔"
+          placeholder={
+            formState.type === QuestionType.JUDGE
+              ? "正确答案，例如 A、B、正确、错误、T、F"
+              : "正确答案，多个答案请用逗号分隔"
+          }
           value={formState.correctAnswers}
           onChange={(event) =>
             setFormState((current) => ({
@@ -224,6 +303,12 @@ export function QuestionEditorModal({
             }))
           }
         />
+
+        <div className="admin-modal-section">
+          <div className="admin-modal-section-title">解析与来源</div>
+          <div className="page-note">用于学员答题后展示解释和答案依据。</div>
+        </div>
+
         <Input
           placeholder="答案来源"
           value={formState.lawSource}
@@ -235,24 +320,13 @@ export function QuestionEditorModal({
           }
         />
         <Input.TextArea
-          rows={3}
+          rows={4}
           placeholder="解析"
           value={formState.analysis}
           onChange={(event) =>
             setFormState((current) => ({
               ...current,
               analysis: event.target.value,
-            }))
-          }
-        />
-        <Input
-          type="number"
-          placeholder="序号"
-          value={String(formState.sortOrder)}
-          onChange={(event) =>
-            setFormState((current) => ({
-              ...current,
-              sortOrder: Number(event.target.value || nextSortOrder),
             }))
           }
         />

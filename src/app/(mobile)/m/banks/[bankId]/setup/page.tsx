@@ -18,10 +18,12 @@ export default async function PracticeSetupPage({
     return (
       <section className="mobile-panel" style={{ padding: 24 }}>
         <div className="mobile-page-header">
-          <h1>题库不存在</h1>
-          <p>请返回题库列表重新选择。</p>
+          <h1>题库不可用</h1>
+          <p>当前题库不存在或已停用，请返回题库列表重新选择。</p>
         </div>
-        <Link href="/m/banks">返回题库列表</Link>
+        <Link href="/m/banks" className="mobile-button">
+          返回题库列表
+        </Link>
       </section>
     );
   }
@@ -30,7 +32,9 @@ export default async function PracticeSetupPage({
     <section className="mobile-panel" style={{ padding: 24 }}>
       <div className="mobile-page-header">
         <div className="inline-actions" style={{ marginBottom: 10 }}>
-          <Link href="/m/banks">返回题库列表</Link>
+          <Link href="/m/banks" className="mobile-button is-small">
+            返回题库列表
+          </Link>
         </div>
         <h1>{bank.name}</h1>
         <p>开始练习前请选择本次题目的出题顺序。</p>
