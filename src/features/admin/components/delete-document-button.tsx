@@ -2,11 +2,12 @@
 
 import { Button } from "antd";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 
 export function DeleteDocumentButton({ documentId }: { documentId: string }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRefreshing, startRefreshTransition] = useTransition();
 
   async function handleDelete() {
     if (isDeleting) {
@@ -23,16 +24,18 @@ export function DeleteDocumentButton({ documentId }: { documentId: string }) {
       const response = await fetch(`/api/admin/statutes/${documentId}`, {
         method: "DELETE",
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
 
       if (!response.ok) {
         window.alert(payload.message ?? "删除资料失败");
         return;
       }
 
-      router.refresh();
+      startRefreshTransition(() => {
+        router.refresh();
+      });
     } catch {
       window.alert("删除资料失败，请稍后重试");
     } finally {
@@ -41,7 +44,12 @@ export function DeleteDocumentButton({ documentId }: { documentId: string }) {
   }
 
   return (
-    <Button danger loading={isDeleting} onClick={handleDelete}>
+    <Button
+      danger
+      loading={isDeleting || isRefreshing}
+      onClick={handleDelete}
+      disabled={isDeleting || isRefreshing}
+    >
       删除资料
     </Button>
   );

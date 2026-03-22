@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Noto_Sans_SC, Source_Code_Pro } from "next/font/google";
+import { Noto_Sans_SC } from "next/font/google";
 import "antd/dist/reset.css";
 
 import { Providers } from "@/app/providers";
@@ -10,11 +10,6 @@ const notoSans = Noto_Sans_SC({
   variable: "--font-noto-sans-sc",
   subsets: ["latin"],
   weight: ["400", "500", "700"],
-});
-
-const sourceCodePro = Source_Code_Pro({
-  variable: "--font-source-code-pro",
-  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
@@ -29,7 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={`${notoSans.variable} ${sourceCodePro.variable}`}>
+      <body className={notoSans.variable}>
         <Providers>{children}</Providers>
       </body>
     </html>

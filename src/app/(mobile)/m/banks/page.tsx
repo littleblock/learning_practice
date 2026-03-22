@@ -7,7 +7,10 @@ import { listMobileBankSummaries } from "@/server/services/bank-service";
 export default async function MobileBanksPage() {
   const session = await requirePageRole(UserRole.LEARNER, "/m/login");
   const banks = await listMobileBankSummaries(session.user.id);
-  const totalQuestions = banks.reduce((sum, bank) => sum + bank.totalQuestions, 0);
+  const totalQuestions = banks.reduce(
+    (sum, bank) => sum + bank.totalQuestions,
+    0,
+  );
   const totalWrongQuestions = banks.reduce(
     (sum, bank) => sum + bank.wrongBookCount,
     0,
@@ -19,7 +22,8 @@ export default async function MobileBanksPage() {
       <section className="mobile-page-header">
         <h1>题库列表</h1>
         <p>
-          你好，{session.user.displayName}。可以从这里开始新的练习，也可以继续上次进度。
+          你好，{session.user.displayName}
+          。可以从这里开始新的练习，也可以继续上次进度。
         </p>
       </section>
 
@@ -43,7 +47,7 @@ export default async function MobileBanksPage() {
       </div>
 
       <div className="inline-actions">
-        <Link href="/m/wrong-books" className="mobile-button">
+        <Link href="/m/wrong-books" className="mobile-button" prefetch={false}>
           进入错题本
         </Link>
       </div>
@@ -56,7 +60,11 @@ export default async function MobileBanksPage() {
 
       <div className="mobile-card-grid">
         {banks.map((bank) => (
-          <section key={bank.id} className="mobile-panel" style={{ padding: 20 }}>
+          <section
+            key={bank.id}
+            className="mobile-panel"
+            style={{ padding: 20 }}
+          >
             <div className="mobile-page-header">
               <h1 style={{ fontSize: 22 }}>{bank.name}</h1>
               <p>{bank.description || "暂无题库简介"}</p>
@@ -89,7 +97,9 @@ export default async function MobileBanksPage() {
               <div className="progress-track">
                 <div
                   className="progress-fill"
-                  style={{ width: `${Math.min(bank.progressRate * 100, 100)}%` }}
+                  style={{
+                    width: `${Math.min(bank.progressRate * 100, 100)}%`,
+                  }}
                 />
               </div>
             </div>
@@ -98,6 +108,7 @@ export default async function MobileBanksPage() {
               <Link
                 href={`/m/banks/${bank.id}/setup`}
                 className="mobile-button is-primary"
+                prefetch={false}
               >
                 进入题库
               </Link>
@@ -105,6 +116,7 @@ export default async function MobileBanksPage() {
                 <Link
                   href={`/m/practice/${bank.resumeSessionId}`}
                   className="mobile-button"
+                  prefetch={false}
                 >
                   继续上次练习
                 </Link>

@@ -34,9 +34,9 @@ export function AdminLoginForm() {
         }),
       });
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
 
       if (!response.ok) {
         setErrorMessage(payload.message ?? "登录失败");
@@ -74,6 +74,12 @@ export function AdminLoginForm() {
           />
           {errorMessage ? (
             <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
+          ) : null}
+          {isSubmitting ? (
+            <div className="action-loading-notice">
+              <strong>正在验证管理员身份</strong>
+              <span>验证通过后会自动进入后台，请勿重复提交。</span>
+            </div>
           ) : null}
           <Button
             type="primary"

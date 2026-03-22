@@ -24,7 +24,10 @@ export async function requireApiRole(role: UserRole) {
   return session;
 }
 
-export function unauthorizedResponse(message = "未登录或无权限", requestId?: string) {
+export function unauthorizedResponse(
+  message = "未登录或无权限",
+  requestId?: string,
+) {
   return jsonWithRequestId(
     {
       message,

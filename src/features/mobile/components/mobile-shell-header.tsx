@@ -46,7 +46,6 @@ export function MobileShellHeader() {
       }
 
       router.replace("/m/login");
-      router.refresh();
     } catch {
       setErrorMessage("退出失败，请稍后重试。");
     } finally {
@@ -60,12 +59,15 @@ export function MobileShellHeader() {
         {navigationItems.map((item) => {
           const isActive =
             pathname === item.href ||
-            item.matchPrefixes.some((prefix) => pathname.startsWith(`${prefix}/`));
+            item.matchPrefixes.some((prefix) =>
+              pathname.startsWith(`${prefix}/`),
+            );
 
           return (
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               className={
                 isActive
                   ? "mobile-button is-small is-primary"

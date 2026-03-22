@@ -1,6 +1,9 @@
 import { prisma } from "@/server/db/client";
 
-export async function getSessionWithCurrentQuestion(sessionId: string, userId: string) {
+export async function getSessionWithCurrentQuestion(
+  sessionId: string,
+  userId: string,
+) {
   const session = await prisma.practiceSession.findFirst({
     where: {
       id: sessionId,

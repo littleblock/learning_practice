@@ -31,9 +31,9 @@ export function LoginForm() {
         }),
       });
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
 
       if (!response.ok) {
         setErrorMessage(payload.message ?? "登录失败，请检查账号和密码。");
@@ -51,13 +51,17 @@ export function LoginForm() {
   return (
     <section className="mobile-panel" style={{ padding: 24 }}>
       <div className="mobile-page-header">
-        <p style={{ color: "var(--brand-primary)", fontWeight: 700, marginBottom: 10 }}>
+        <p
+          style={{
+            color: "var(--brand-primary)",
+            fontWeight: 700,
+            marginBottom: 10,
+          }}
+        >
           法律刷题系统
         </p>
         <h1>欢迎回来</h1>
-        <p>
-          输入学习账号后即可开始刷题、查看错题本，并继续上一轮练习进度。
-        </p>
+        <p>输入学习账号后即可开始刷题、查看错题本，并继续上一轮练习进度。</p>
       </div>
 
       <div className="mobile-hero-icon">法</div>
@@ -81,6 +85,12 @@ export function LoginForm() {
           />
           {errorMessage ? (
             <div className="mobile-feedback is-error">{errorMessage}</div>
+          ) : null}
+          {isSubmitting ? (
+            <div className="action-loading-notice">
+              <strong>正在登录学习账号</strong>
+              <span>系统会在验证通过后自动进入题库列表，请稍候。</span>
+            </div>
           ) : null}
           <button
             className="mobile-button is-primary is-block"

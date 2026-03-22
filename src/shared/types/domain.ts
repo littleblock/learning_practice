@@ -112,6 +112,11 @@ export interface QuestionImportBatchDetail {
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
   draftCount: number;
+  totalSourceRows: number;
+  processedSourceRows: number;
+  totalChunks: number;
+  processedChunks: number;
+  currentConcurrency: number;
   lastError: string | null;
   createdAt: string;
   parsedAt: string | null;
@@ -127,6 +132,11 @@ export interface QuestionImportBatchSummary {
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
   draftCount: number;
+  totalSourceRows: number;
+  processedSourceRows: number;
+  totalChunks: number;
+  processedChunks: number;
+  currentConcurrency: number;
   lastError: string | null;
   createdAt: string;
   parsedAt: string | null;

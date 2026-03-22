@@ -35,19 +35,37 @@ export function buildQuestionEmbeddingText(input: {
     .join("\n");
 }
 
-export async function saveQuestionEmbedding(questionId: string, vector: number[]) {
+export async function saveQuestionEmbedding(
+  questionId: string,
+  vector: number[],
+) {
   const vectorLiteral = vectorToSqlLiteral(vector);
   await prisma.$executeRaw`UPDATE "Question" SET "embedding" = ${vectorLiteral}::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = ${questionId}`;
 }
 
-export async function saveStatuteChunkEmbedding(chunkId: string, vector: number[]) {
+export async function saveStatuteChunkEmbedding(
+  chunkId: string,
+  vector: number[],
+) {
   const vectorLiteral = vectorToSqlLiteral(vector);
   await prisma.$executeRaw`UPDATE "StatuteChunk" SET "embedding" = ${vectorLiteral}::vector, "embeddingUpdatedAt" = NOW() WHERE "id" = ${chunkId}`;
 }
 
 export async function refreshQuestionEmbedding(questionId: string) {
-  const question = await prisma.question.findUnique({
-    where: { id: questionId },
+  await refreshQuestionEmbeddings([questionId]);
+}
+
+export async function refreshQuestionEmbeddings(questionIds: string[]) {
+  if (questionIds.length === 0) {
+    return;
+  }
+
+  const questions = await prisma.question.findMany({
+    where: {
+      id: {
+        in: questionIds,
+      },
+    },
     select: {
       id: true,
       stem: true,
@@ -57,20 +75,26 @@ export async function refreshQuestionEmbedding(questionId: string) {
     },
   });
 
-  if (!question) {
+  if (questions.length === 0) {
     return;
   }
 
-  const [vector] = await embedTexts([
-    buildQuestionEmbeddingText({
-      stem: question.stem,
-      options: question.options,
-      correctAnswers: question.correctAnswers,
-      lawSource: question.lawSource,
-    }),
-  ]);
+  const vectors = await embedTexts(
+    questions.map((question) =>
+      buildQuestionEmbeddingText({
+        stem: question.stem,
+        options: question.options,
+        correctAnswers: question.correctAnswers,
+        lawSource: question.lawSource,
+      }),
+    ),
+  );
 
-  await saveQuestionEmbedding(question.id, vector);
+  await Promise.all(
+    questions.map((question, index) =>
+      saveQuestionEmbedding(question.id, vectors[index]),
+    ),
+  );
 }
 
 /**
@@ -86,7 +110,10 @@ export async function refreshQuestionEmbedding(questionId: string) {
 关键约束：
 当前仅缓存单条最佳结果；若题库暂无可用切片，则删除已有缓存，避免展示过期法条。
 */
-export async function rebuildQuestionMatchesForBank(bankId: string, questionIds?: string[]) {
+export async function rebuildQuestionMatchesForBank(
+  bankId: string,
+  questionIds?: string[],
+) {
   const questions = await prisma.question.findMany({
     where: {
       bankId,
@@ -117,11 +144,15 @@ export async function rebuildQuestionMatchesForBank(bankId: string, questionIds?
     return;
   }
 
-  for (const question of questions) {
-    if (!question.embeddingUpdatedAt) {
-      await refreshQuestionEmbedding(question.id);
-    }
+  const missingEmbeddingQuestionIds = questions
+    .filter((question) => !question.embeddingUpdatedAt)
+    .map((question) => question.id);
 
+  if (missingEmbeddingQuestionIds.length > 0) {
+    await refreshQuestionEmbeddings(missingEmbeddingQuestionIds);
+  }
+
+  for (const question of questions) {
     const vectorRows = await prisma.$queryRaw<Array<{ embedding: string }>>`
       SELECT "embedding"::text AS "embedding" FROM "Question" WHERE "id" = ${question.id} AND "embedding" IS NOT NULL
     `;
@@ -167,7 +198,9 @@ export async function rebuildQuestionMatchesForBank(bankId: string, questionIds?
   }
 }
 
-export function resolveMatchedExcerpt(match: { excerpt: string; score: number } | null) {
+export function resolveMatchedExcerpt(
+  match: { excerpt: string; score: number } | null,
+) {
   if (!match || match.score < MATCH_SCORE_THRESHOLD) {
     return null;
   }

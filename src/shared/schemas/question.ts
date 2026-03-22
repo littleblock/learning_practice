@@ -1,6 +1,8 @@
 import { QuestionType } from "@prisma/client";
 import { z } from "zod";
 
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/app";
+
 export const questionOptionSchema = z.object({
   label: z.string().trim().min(1, "选项标识不能为空"),
   text: z.string().trim().min(1, "选项内容不能为空"),
@@ -58,7 +60,12 @@ export const questionListQuerySchema = z.object({
   ),
   lawSource: z.string().trim().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .default(DEFAULT_PAGE_SIZE),
 });
 
 export const questionImportRowSchema = z

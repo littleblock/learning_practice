@@ -4,7 +4,7 @@ export const SESSION_COOKIE_NAME = "learning_practice_session";
 
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
-export const DEFAULT_PAGE_SIZE = 20;
+export const DEFAULT_PAGE_SIZE = 10;
 
 export const MAX_PAGE_SIZE = 100;
 

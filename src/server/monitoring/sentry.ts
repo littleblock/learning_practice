@@ -37,7 +37,10 @@ function ensureSentryInitialized() {
   return enabled;
 }
 
-export function captureServerException(error: unknown, extra?: Record<string, unknown>) {
+export function captureServerException(
+  error: unknown,
+  extra?: Record<string, unknown>,
+) {
   if (!ensureSentryInitialized()) {
     return;
   }

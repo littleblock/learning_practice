@@ -1,14 +1,13 @@
 "use client";
 
 import { Button, Tabs } from "antd";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 
 import { QuestionFilters } from "@/features/admin/components/admin-filters";
 import { AdminPagination } from "@/features/admin/components/admin-pagination";
-import { QuestionEditorModal } from "@/features/admin/components/question-editor-modal";
-import { QuestionImportModal } from "@/features/admin/components/question-import-modal";
 import type {
   QuestionImportBatchSummary,
   QuestionListItem,
@@ -21,6 +20,17 @@ import {
   joinOptions,
   truncateText,
 } from "@/shared/utils/format";
+
+const QuestionEditorModal = dynamic(() =>
+  import("@/features/admin/components/question-editor-modal").then(
+    (module) => module.QuestionEditorModal,
+  ),
+);
+const QuestionImportModal = dynamic(() =>
+  import("@/features/admin/components/question-import-modal").then(
+    (module) => module.QuestionImportModal,
+  ),
+);
 
 function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
   switch (status) {
@@ -36,6 +46,48 @@ function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
     default:
       return "查看";
   }
+}
+
+function getBatchProgressPercent(batch: QuestionImportBatchSummary) {
+  if (batch.totalSourceRows > 0) {
+    return Math.min(
+      100,
+      Math.round((batch.processedSourceRows / batch.totalSourceRows) * 100),
+    );
+  }
+
+  if (batch.status === "READY" || batch.status === "CONFIRMED") {
+    return 100;
+  }
+
+  return 0;
+}
+
+function getBatchProgressText(batch: QuestionImportBatchSummary) {
+  const rowProgress =
+    batch.totalSourceRows > 0
+      ? `${batch.processedSourceRows}/${batch.totalSourceRows} 行`
+      : batch.status === "READY" || batch.status === "CONFIRMED"
+        ? "已完成"
+        : batch.status === "FAILED"
+          ? "已失败"
+          : "等待开始";
+  const chunkProgress =
+    batch.totalChunks > 0
+      ? `${batch.processedChunks}/${batch.totalChunks} 块`
+      : batch.status === "READY" || batch.status === "CONFIRMED"
+        ? "分块完成"
+        : batch.status === "FAILED"
+          ? "分块中断"
+          : "未生成分块";
+  const concurrencyText =
+    batch.currentConcurrency > 0
+      ? `当前并发 ${batch.currentConcurrency}`
+      : null;
+
+  return [rowProgress, chunkProgress, concurrencyText]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function QuestionManager({
@@ -83,6 +135,14 @@ export function QuestionManager({
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isRefreshing, startRefreshTransition] = useTransition();
+  const [isSwitchingTab, startTabTransition] = useTransition();
+
+  function refreshCurrentPage() {
+    startRefreshTransition(() => {
+      router.refresh();
+    });
+  }
 
   async function deleteQuestion(questionId: string) {
     if (!window.confirm("删除题目后将同步刷新匹配结果，确认删除吗？")) {
@@ -105,7 +165,7 @@ export function QuestionManager({
         return;
       }
 
-      router.refresh();
+      refreshCurrentPage();
     } catch (error) {
       console.error("删除题目失败", error);
       setDeleteError("删除题目失败");
@@ -141,7 +201,11 @@ export function QuestionManager({
       }
     }
 
-    router.push(`/admin/banks/${bankId}/questions?${searchParams.toString()}`);
+    startTabTransition(() => {
+      router.push(
+        `/admin/banks/${bankId}/questions?${searchParams.toString()}`,
+      );
+    });
   }
 
   return (
@@ -151,13 +215,17 @@ export function QuestionManager({
           className="admin-content-tabs"
           activeKey={activeTab}
           onChange={handleTabChange}
+          destroyOnHidden
           items={[
             {
               key: "questions",
               label: `题目列表（${questionTotal}）`,
               children: (
                 <div className="admin-tab-content">
-                  <div className="admin-section-header" style={{ marginBottom: 16 }}>
+                  <div
+                    className="admin-section-header"
+                    style={{ marginBottom: 16 }}
+                  >
                     <div>
                       <h2 style={{ margin: 0, fontSize: 20 }}>题目列表</h2>
                       <p className="page-note" style={{ marginTop: 8 }}>
@@ -165,7 +233,11 @@ export function QuestionManager({
                       </p>
                     </div>
                     <div className="inline-actions">
-                      <Button type="primary" onClick={() => openEditor(null)}>
+                      <Button
+                        type="primary"
+                        onClick={() => openEditor(null)}
+                        disabled={isRefreshing || isSwitchingTab}
+                      >
                         新增题目
                       </Button>
                     </div>
@@ -184,94 +256,118 @@ export function QuestionManager({
                     }}
                   />
 
-                  <p className="page-note" style={{ marginTop: 14 }}>
-                    当前共筛选到 {questionTotal} 道题目。
-                  </p>
-
-                  <AdminPagination
-                    basePath={`/admin/banks/${bankId}/questions`}
-                    page={questionPage}
-                    pageSize={questionPageSize}
-                    total={questionTotal}
-                    query={buildTabQuery("questions")}
-                  />
+                  <div className="admin-inline-status-row">
+                    <p className="page-note" style={{ margin: 0 }}>
+                      当前共筛选到 {questionTotal} 道题目。
+                    </p>
+                    {isRefreshing ? (
+                      <span className="admin-inline-status">
+                        正在刷新当前列表…
+                      </span>
+                    ) : null}
+                    {isSwitchingTab ? (
+                      <span className="admin-inline-status">正在切换标签…</span>
+                    ) : null}
+                  </div>
 
                   {deleteError ? (
-                    <div style={{ color: "var(--danger)", marginBottom: 12 }}>
-                      {deleteError}
-                    </div>
+                    <div style={{ color: "var(--danger)" }}>{deleteError}</div>
                   ) : null}
 
                   {questions.length === 0 ? (
                     <div className="admin-empty-state">
-                      当前筛选结果为空，可以调整筛选条件，或通过新增题目、Excel 导入补充内容。
+                      当前筛选结果为空，可以调整筛选条件，或通过新增题目、Excel
+                      导入补充内容。
                     </div>
                   ) : (
-                    <div className="admin-table-wrap">
-                      <table className="admin-table is-question-table">
-                        <thead>
-                          <tr>
-                            <th>序号</th>
-                            <th>题目类型</th>
-                            <th>题干</th>
-                            <th>选项</th>
-                            <th>正确答案</th>
-                            <th>解析</th>
-                            <th>答案来源</th>
-                            <th>创建人</th>
-                            <th>创建时间</th>
-                            <th>更新人</th>
-                            <th>更新时间</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {questions.map((question) => (
-                            <tr key={question.id}>
-                              <td>{question.sortOrder}</td>
-                              <td>{getQuestionTypeLabel(question.type)}</td>
-                              <td title={question.stem}>
-                                {truncateText(question.stem, 80)}
-                              </td>
-                              <td title={joinOptions(question.options)}>
-                                {truncateText(joinOptions(question.options), 120)}
-                              </td>
-                              <td>{question.correctAnswers.join(", ")}</td>
-                              <td title={question.analysis || "-"}>
-                                {truncateText(question.analysis, 60)}
-                              </td>
-                              <td title={question.lawSource || "-"}>
-                                {truncateText(question.lawSource, 40)}
-                              </td>
-                              <td>{question.createdByName || "-"}</td>
-                              <td>{formatDateTime(question.createdAt)}</td>
-                              <td>{question.updatedByName || "-"}</td>
-                              <td>{formatDateTime(question.updatedAt)}</td>
-                              <td className="admin-table-actions-cell">
-                                <div className="admin-table-action-links">
-                                  <button
-                                    type="button"
-                                    className="admin-table-inline-button"
-                                    onClick={() => openEditor(question)}
-                                  >
-                                    编辑
-                                  </button>
-                                  <span className="admin-table-action-divider">|</span>
-                                  <button
-                                    type="button"
-                                    className="admin-table-inline-button is-danger"
-                                    onClick={() => void deleteQuestion(question.id)}
-                                    disabled={deletingId === question.id}
-                                  >
-                                    {deletingId === question.id ? "删除中..." : "删除"}
-                                  </button>
-                                </div>
-                              </td>
+                    <>
+                      <div className="admin-table-wrap">
+                        <table className="admin-table is-question-table">
+                          <thead>
+                            <tr>
+                              <th style={{ width: 88 }}>序号</th>
+                              <th style={{ width: 108 }}>题目类型</th>
+                              <th style={{ width: "24%" }}>题干</th>
+                              <th style={{ width: "24%" }}>选项</th>
+                              <th style={{ width: 132 }}>正确答案</th>
+                              <th style={{ width: "18%" }}>解析</th>
+                              <th style={{ width: 180 }}>答案来源</th>
+                              <th style={{ width: 110 }}>创建人</th>
+                              <th style={{ width: 168 }}>创建时间</th>
+                              <th style={{ width: 110 }}>更新人</th>
+                              <th style={{ width: 168 }}>更新时间</th>
+                              <th style={{ width: 180 }}>操作</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {questions.map((question) => (
+                              <tr key={question.id}>
+                                <td>{question.sortOrder}</td>
+                                <td>{getQuestionTypeLabel(question.type)}</td>
+                                <td title={question.stem}>
+                                  {truncateText(question.stem, 80)}
+                                </td>
+                                <td title={joinOptions(question.options)}>
+                                  {truncateText(
+                                    joinOptions(question.options),
+                                    120,
+                                  )}
+                                </td>
+                                <td>{question.correctAnswers.join(", ")}</td>
+                                <td title={question.analysis || "-"}>
+                                  {truncateText(question.analysis, 60)}
+                                </td>
+                                <td title={question.lawSource || "-"}>
+                                  {truncateText(question.lawSource, 40)}
+                                </td>
+                                <td>{question.createdByName || "-"}</td>
+                                <td>{formatDateTime(question.createdAt)}</td>
+                                <td>{question.updatedByName || "-"}</td>
+                                <td>{formatDateTime(question.updatedAt)}</td>
+                                <td className="admin-table-actions-cell">
+                                  <div className="admin-table-action-links">
+                                    <button
+                                      type="button"
+                                      className="admin-table-inline-button"
+                                      onClick={() => openEditor(question)}
+                                      disabled={isRefreshing || isSwitchingTab}
+                                    >
+                                      编辑
+                                    </button>
+                                    <span className="admin-table-action-divider">
+                                      |
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="admin-table-inline-button is-danger"
+                                      onClick={() =>
+                                        void deleteQuestion(question.id)
+                                      }
+                                      disabled={
+                                        deletingId === question.id ||
+                                        isRefreshing ||
+                                        isSwitchingTab
+                                      }
+                                    >
+                                      {deletingId === question.id
+                                        ? "删除中..."
+                                        : "删除"}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <AdminPagination
+                        basePath={`/admin/banks/${bankId}/questions`}
+                        page={questionPage}
+                        pageSize={questionPageSize}
+                        total={questionTotal}
+                        query={buildTabQuery("questions")}
+                      />
+                    </>
                   )}
                 </div>
               ),
@@ -281,89 +377,152 @@ export function QuestionManager({
               label: `导入记录（${importBatchTotal}）`,
               children: (
                 <div className="admin-tab-content">
-                  <div className="admin-section-header" style={{ marginBottom: 16 }}>
+                  <div
+                    className="admin-section-header"
+                    style={{ marginBottom: 16 }}
+                  >
                     <div>
                       <h2 style={{ margin: 0, fontSize: 20 }}>导入记录</h2>
                       <p className="page-note" style={{ marginTop: 8 }}>
-                        只有标准模板按规则解析，其他文件全部交给 AI 识别。每一行都会记录是否成功匹配为题目。
+                        只有标准模板按规则解析，其他文件全部交给 AI
+                        识别。每一行都会记录是否成功匹配为题目。
                       </p>
                     </div>
                     <div className="inline-actions">
-                      <Link href="/api/admin/questions/import/template">
+                      <Link
+                        href="/api/admin/questions/import/template"
+                        prefetch={false}
+                      >
                         下载标准模板
                       </Link>
-                      <Button onClick={() => router.refresh()}>刷新记录</Button>
-                      <Button type="primary" onClick={() => openImport(null)}>
+                      <Button
+                        onClick={refreshCurrentPage}
+                        loading={isRefreshing}
+                        disabled={isSwitchingTab}
+                      >
+                        刷新记录
+                      </Button>
+                      <Button
+                        type="primary"
+                        onClick={() => openImport(null)}
+                        disabled={isRefreshing || isSwitchingTab}
+                      >
                         Excel 导入
                       </Button>
                     </div>
                   </div>
 
-                  <AdminPagination
-                    basePath={`/admin/banks/${bankId}/questions`}
-                    page={importBatchPage}
-                    pageSize={importBatchPageSize}
-                    total={importBatchTotal}
-                    query={buildTabQuery("imports")}
-                    pageParam="recordPage"
-                    pageSizeParam="recordPageSize"
-                  />
+                  <div className="admin-inline-status-row">
+                    <p className="page-note" style={{ margin: 0 }}>
+                      当前共有 {importBatchTotal}{" "}
+                      条导入记录，可查看解析进度与失败原因。
+                    </p>
+                    {isRefreshing ? (
+                      <span className="admin-inline-status">
+                        正在刷新导入记录…
+                      </span>
+                    ) : null}
+                    {isSwitchingTab ? (
+                      <span className="admin-inline-status">正在切换标签…</span>
+                    ) : null}
+                  </div>
 
                   {importBatches.length === 0 ? (
                     <div className="admin-empty-state">
-                      当前题库还没有导入记录，点击“Excel 导入”即可上传文件并查看解析结果。
+                      当前题库还没有导入记录，点击“Excel
+                      导入”即可上传文件并查看解析结果。
                     </div>
                   ) : (
-                    <div className="admin-table-wrap">
-                      <table className="admin-table is-import-table">
-                        <thead>
-                          <tr>
-                            <th>文件名</th>
-                            <th>解析方式</th>
-                            <th>状态</th>
-                            <th>草稿数</th>
-                            <th>工作表</th>
-                            <th>上传时间</th>
-                            <th>解析时间</th>
-                            <th>确认时间</th>
-                            <th>错误信息</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importBatches.map((batch) => (
-                            <tr key={batch.id}>
-                              <td title={batch.fileName}>
-                                {truncateText(batch.fileName, 48)}
-                              </td>
-                              <td>{getImportTemplateTypeLabel(batch.templateType)}</td>
-                              <td>{getBatchStatusLabel(batch.status)}</td>
-                              <td>{batch.draftCount}</td>
-                              <td title={batch.sourceSheetName || "-"}>
-                                {truncateText(batch.sourceSheetName, 24)}
-                              </td>
-                              <td>{formatDateTime(batch.createdAt)}</td>
-                              <td>{formatDateTime(batch.parsedAt)}</td>
-                              <td>{formatDateTime(batch.confirmedAt)}</td>
-                              <td title={batch.lastError || "-"}>
-                                {truncateText(batch.lastError, 48)}
-                              </td>
-                              <td className="admin-table-actions-cell">
-                                <div className="admin-table-action-links">
-                                  <button
-                                    type="button"
-                                    className="admin-table-inline-button"
-                                    onClick={() => openImport(batch.id)}
-                                  >
-                                    {getBatchActionLabel(batch.status)}
-                                  </button>
-                                </div>
-                              </td>
+                    <>
+                      <div className="admin-table-wrap">
+                        <table className="admin-table is-import-table">
+                          <thead>
+                            <tr>
+                              <th style={{ width: "23%" }}>文件名</th>
+                              <th style={{ width: 120 }}>解析方式</th>
+                              <th style={{ width: 112 }}>状态</th>
+                              <th style={{ width: "24%" }}>进度</th>
+                              <th style={{ width: 96 }}>草稿数</th>
+                              <th style={{ width: 150 }}>工作表</th>
+                              <th style={{ width: 168 }}>上传时间</th>
+                              <th style={{ width: 168 }}>解析时间</th>
+                              <th style={{ width: "18%" }}>错误信息</th>
+                              <th style={{ width: 140 }}>操作</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {importBatches.map((batch) => {
+                              const progressPercent =
+                                getBatchProgressPercent(batch);
+
+                              return (
+                                <tr key={batch.id}>
+                                  <td title={batch.fileName}>
+                                    {truncateText(batch.fileName, 48)}
+                                  </td>
+                                  <td>
+                                    {getImportTemplateTypeLabel(
+                                      batch.templateType,
+                                    )}
+                                  </td>
+                                  <td>{getBatchStatusLabel(batch.status)}</td>
+                                  <td>
+                                    <div className="admin-progress-cell">
+                                      <div className="progress-track admin-progress-track">
+                                        <div
+                                          className="progress-fill"
+                                          style={{
+                                            width: `${progressPercent}%`,
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="admin-progress-meta">
+                                        <span>{progressPercent}%</span>
+                                        <span>
+                                          {getBatchProgressText(batch)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td>{batch.draftCount}</td>
+                                  <td title={batch.sourceSheetName || "-"}>
+                                    {truncateText(batch.sourceSheetName, 24)}
+                                  </td>
+                                  <td>{formatDateTime(batch.createdAt)}</td>
+                                  <td>{formatDateTime(batch.parsedAt)}</td>
+                                  <td title={batch.lastError || "-"}>
+                                    {truncateText(batch.lastError, 48)}
+                                  </td>
+                                  <td className="admin-table-actions-cell">
+                                    <div className="admin-table-action-links">
+                                      <button
+                                        type="button"
+                                        className="admin-table-inline-button"
+                                        onClick={() => openImport(batch.id)}
+                                        disabled={
+                                          isRefreshing || isSwitchingTab
+                                        }
+                                      >
+                                        {getBatchActionLabel(batch.status)}
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <AdminPagination
+                        basePath={`/admin/banks/${bankId}/questions`}
+                        page={importBatchPage}
+                        pageSize={importBatchPageSize}
+                        total={importBatchTotal}
+                        query={buildTabQuery("imports")}
+                        pageParam="recordPage"
+                        pageSizeParam="recordPageSize"
+                      />
+                    </>
                   )}
                 </div>
               ),
@@ -378,7 +537,7 @@ export function QuestionManager({
         question={editingQuestion}
         nextSortOrder={nextSortOrder}
         onClose={() => setEditorOpen(false)}
-        onSuccess={() => router.refresh()}
+        onSuccess={refreshCurrentPage}
       />
 
       <QuestionImportModal
@@ -386,8 +545,8 @@ export function QuestionManager({
         open={importOpen}
         initialBatchId={activeBatchId}
         onClose={() => setImportOpen(false)}
-        onSuccess={() => router.refresh()}
-        onBatchChange={() => router.refresh()}
+        onSuccess={refreshCurrentPage}
+        onBatchChange={refreshCurrentPage}
       />
     </>
   );

@@ -34,6 +34,7 @@ export function StartPracticeForm({
       ? PracticeMode.RANDOM
       : PracticeMode.SEQUENTIAL,
   );
+  const [isInteractive, setIsInteractive] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -44,6 +45,10 @@ export function StartPracticeForm({
         : PracticeMode.SEQUENTIAL,
     );
   }, [sourceType]);
+
+  useEffect(() => {
+    setIsInteractive(true);
+  }, []);
 
   async function createSession() {
     if (isSubmitting) {
@@ -65,9 +70,7 @@ export function StartPracticeForm({
         }),
       });
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as {
+      const payload = (await response.json().catch(() => ({}))) as {
         message?: string;
         sessionId?: string;
       };
@@ -98,11 +101,18 @@ export function StartPracticeForm({
                 : "mobile-choice-button"
             }
             onClick={() => setMode(option.value)}
+            disabled={!isInteractive || isSubmitting}
           >
             {option.label}
           </button>
         ))}
       </div>
+      {!isInteractive ? (
+        <div className="action-loading-notice">
+          <strong>正在准备练习设置</strong>
+          <span>页面交互初始化完成后即可开始练习，请稍候。</span>
+        </div>
+      ) : null}
       <div className="page-note">
         {sourceType === PracticeSourceType.WRONG_BOOK
           ? "错题练习仅支持随机模式，便于打散记忆顺序。"
@@ -111,14 +121,20 @@ export function StartPracticeForm({
       {feedbackMessage ? (
         <div className="mobile-feedback is-error">{feedbackMessage}</div>
       ) : null}
+      {isSubmitting ? (
+        <div className="action-loading-notice">
+          <strong>正在创建练习会话</strong>
+          <span>系统会自动跳转到答题页，请不要重复点击开始按钮。</span>
+        </div>
+      ) : null}
       <button
         type="button"
         className="mobile-button is-primary is-block"
         onClick={createSession}
-        disabled={isSubmitting}
-        aria-busy={isSubmitting}
+        disabled={!isInteractive || isSubmitting}
+        aria-busy={!isInteractive || isSubmitting}
       >
-        {isSubmitting ? "创建中..." : buttonText}
+        {!isInteractive ? "页面准备中..." : isSubmitting ? "创建中..." : buttonText}
       </button>
     </div>
   );

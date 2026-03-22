@@ -47,19 +47,15 @@ export default async function AdminBanksPage({
           </div>
         </div>
 
-        <BankFilters keyword={keyword} status={status} />
+        <BankFilters
+          keyword={keyword}
+          status={status}
+          pageSize={String(result.pageSize)}
+        />
 
         <p className="page-note" style={{ marginTop: 14 }}>
           当前共匹配到 {result.total} 个题库。
         </p>
-
-        <AdminPagination
-          basePath="/admin/banks"
-          page={result.page}
-          pageSize={result.pageSize}
-          total={result.total}
-          query={{ keyword, status }}
-        />
 
         {result.items.length === 0 ? (
           <section className="admin-empty-state">
@@ -79,6 +75,14 @@ export default async function AdminBanksPage({
             }))}
           />
         )}
+
+        <AdminPagination
+          basePath="/admin/banks"
+          page={result.page}
+          pageSize={result.pageSize}
+          total={result.total}
+          query={{ keyword, status }}
+        />
       </section>
     </AdminShell>
   );

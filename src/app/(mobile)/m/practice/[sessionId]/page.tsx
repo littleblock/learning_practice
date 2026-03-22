@@ -24,10 +24,18 @@ export default async function PracticePage({
           <p>当前会话可能已失效、已完成或不存在，请返回题库列表重新开始。</p>
         </div>
         <div className="inline-actions">
-          <Link href="/m/banks" className="mobile-button is-primary">
+          <Link
+            href="/m/banks"
+            className="mobile-button is-primary"
+            prefetch={false}
+          >
             返回题库列表
           </Link>
-          <Link href="/m/wrong-books" className="mobile-button">
+          <Link
+            href="/m/wrong-books"
+            className="mobile-button"
+            prefetch={false}
+          >
             查看错题本
           </Link>
         </div>

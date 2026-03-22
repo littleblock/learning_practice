@@ -8,19 +8,20 @@ ensureProcessEnvLoaded();
 const prisma = new PrismaClient();
 
 async function main() {
-  const defaultPasswordHash = await bcrypt.hash("123456", 10);
+  const adminPasswordHash = await bcrypt.hash("123456", 10);
+  const learnerPasswordHash = await bcrypt.hash("study@123", 10);
 
   await prisma.user.upsert({
     where: { loginName: "admin" },
     update: {
       displayName: "admin",
-      passwordHash: defaultPasswordHash,
+      passwordHash: adminPasswordHash,
       role: UserRole.ADMIN,
     },
     create: {
       loginName: "admin",
       displayName: "admin",
-      passwordHash: defaultPasswordHash,
+      passwordHash: adminPasswordHash,
       role: UserRole.ADMIN,
     },
   });
@@ -29,13 +30,13 @@ async function main() {
     where: { loginName: "syy" },
     update: {
       displayName: "syy",
-      passwordHash: defaultPasswordHash,
+      passwordHash: learnerPasswordHash,
       role: UserRole.LEARNER,
     },
     create: {
       loginName: "syy",
       displayName: "syy",
-      passwordHash: defaultPasswordHash,
+      passwordHash: learnerPasswordHash,
       role: UserRole.LEARNER,
     },
   });

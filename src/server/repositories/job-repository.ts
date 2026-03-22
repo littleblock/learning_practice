@@ -110,7 +110,9 @@ export async function releaseJobFailure(
     where: { id: job.id },
     data: {
       status: nextStatus,
-      availableAt: reachedMaxAttempts ? undefined : new Date(Date.now() + 60_000),
+      availableAt: reachedMaxAttempts
+        ? undefined
+        : new Date(Date.now() + 60_000),
       finishedAt: reachedMaxAttempts ? new Date() : null,
       lockedAt: null,
       lockedBy: null,

@@ -125,7 +125,9 @@ export function normalizeImportQuestionTypeValue(
     return "multiple";
   }
 
-  if (["judge", "truefalse", "boolean", "判断", "判断题"].includes(comparable)) {
+  if (
+    ["judge", "truefalse", "boolean", "判断", "判断题"].includes(comparable)
+  ) {
     return "judge";
   }
 

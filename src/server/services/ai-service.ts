@@ -16,7 +16,8 @@ function createDeterministicEmbedding(text: string, dimension: number) {
     vector[target] += text.charCodeAt(index) / 65535;
   }
 
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+  const magnitude =
+    Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
   return vector.map((value) => Number((value / magnitude).toFixed(8)));
 }
 
@@ -37,22 +38,29 @@ export async function embedTexts(texts: string[]) {
     return texts.map((text) => createDeterministicEmbedding(text, dimension));
   }
 
-  const response = await fetch(`${env.AI_BASE_URL.replace(/\/$/, "")}/embeddings`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.AI_API_KEY}`,
+  const response = await fetch(
+    `${env.AI_BASE_URL.replace(/\/$/, "")}/embeddings`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.AI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: env.AI_EMBED_MODEL,
+        input: texts,
+      }),
     },
-    body: JSON.stringify({
-      model: env.AI_EMBED_MODEL,
-      input: texts,
-    }),
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(`Embedding 接口调用失败: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Embedding 接口调用失败: ${response.status} ${response.statusText}`,
+    );
   }
 
   const payload = (await response.json()) as EmbeddingResponse;
-  return payload.data.sort((left, right) => left.index - right.index).map((item) => item.embedding);
+  return payload.data
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.embedding);
 }

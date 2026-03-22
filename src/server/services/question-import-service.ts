@@ -16,8 +16,8 @@ import {
 } from "@/shared/schemas/question";
 import type {
   QuestionImportBatchDetail,
-  QuestionImportDraftItem,
   QuestionImportSourceRowItem,
+  QuestionImportDraftItem,
   QuestionImportBatchSummary,
 } from "@/shared/types/domain";
 import { EXCEL_MAX_SIZE_BYTES } from "@/shared/constants/app";
@@ -25,22 +25,32 @@ import {
   isAllowedExcelFile,
   isAllowedExcelMimeType,
 } from "@/shared/utils/file";
+import { resolvePagination } from "@/shared/utils/pagination";
 import { prisma } from "@/server/db/client";
+import { getServerEnv } from "@/server/env";
 import { logger } from "@/server/logger";
 import { enqueueJob } from "@/server/repositories/job-repository";
+import {
+  AiSplitConcurrencyController,
+  mapWithAdaptiveConcurrency,
+} from "@/server/services/ai-split-concurrency";
 import { assertBankExists } from "@/server/services/bank-service";
 import {
+  isAiRateLimitError,
   splitQuestionsWithAi,
   type AiSourceRowInput,
 } from "@/server/services/question-import-ai-service";
+import { refreshQuestionEmbeddings } from "@/server/services/matching-service";
 import {
   looksLikeLawSource,
   mapImportRowToQuestionInput,
   normalizeImportQuestionTypeValue,
   normalizeQuestionInput,
 } from "@/server/services/question-payload";
-import { refreshQuestionEmbedding } from "@/server/services/matching-service";
-import { readStoredFile, saveUploadedFile } from "@/server/storage/file-storage";
+import {
+  readStoredFile,
+  saveUploadedFile,
+} from "@/server/storage/file-storage";
 
 export interface SheetRow {
   rowNumber: number;
@@ -61,9 +71,59 @@ interface ParsedWorkbookResult {
   sourceRows: QuestionImportSourceRowItem[];
 }
 
-const aiChunkRowLimit = 4;
-const aiChunkTextLimit = 2500;
 const questionCreateChunkSize = 200;
+const standardTemplateChunkCount = 1;
+
+interface ParsedAiChunkResult {
+  drafts: QuestionImportDraftInput[];
+  failedRows: FailedSourceRow[];
+}
+
+async function initializeBatchProgress(
+  batchId: string,
+  input: {
+    totalSourceRows: number;
+    processedSourceRows: number;
+    totalChunks: number;
+    processedChunks: number;
+    currentConcurrency: number;
+  },
+) {
+  await prisma.questionImportBatch.update({
+    where: { id: batchId },
+    data: input,
+  });
+}
+
+async function syncBatchProcessingProgress(
+  batchId: string,
+  input: {
+    processedSourceRowsIncrement?: number;
+    processedChunksIncrement?: number;
+    currentConcurrency: number;
+  },
+) {
+  await prisma.questionImportBatch.update({
+    where: { id: batchId },
+    data: {
+      ...(input.processedSourceRowsIncrement
+        ? {
+            processedSourceRows: {
+              increment: input.processedSourceRowsIncrement,
+            },
+          }
+        : {}),
+      ...(input.processedChunksIncrement
+        ? {
+            processedChunks: {
+              increment: input.processedChunksIncrement,
+            },
+          }
+        : {}),
+      currentConcurrency: input.currentConcurrency,
+    },
+  });
+}
 
 const standardTemplateColumns = [
   { key: "question_type", label: "题型" },
@@ -107,7 +167,9 @@ function buildRowContent(values: string[]) {
 }
 
 function buildSourceRowLabel(sourceRowNumbers: number[]) {
-  const numbers = Array.from(new Set(sourceRowNumbers)).sort((left, right) => left - right);
+  const numbers = Array.from(new Set(sourceRowNumbers)).sort(
+    (left, right) => left - right,
+  );
   if (numbers.length === 1) {
     return `第 ${numbers[0]} 行`;
   }
@@ -188,6 +250,11 @@ function mapBatchSummary(item: {
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
   draftCount: number;
+  totalSourceRows: number;
+  processedSourceRows: number;
+  totalChunks: number;
+  processedChunks: number;
+  currentConcurrency: number;
   lastError: string | null;
   createdAt: Date;
   parsedAt: Date | null;
@@ -200,6 +267,11 @@ function mapBatchSummary(item: {
     templateType: item.templateType,
     status: item.status,
     draftCount: item.draftCount,
+    totalSourceRows: item.totalSourceRows,
+    processedSourceRows: item.processedSourceRows,
+    totalChunks: item.totalChunks,
+    processedChunks: item.processedChunks,
+    currentConcurrency: item.currentConcurrency,
     lastError: item.lastError,
     createdAt: item.createdAt.toISOString(),
     parsedAt: item.parsedAt?.toISOString() ?? null,
@@ -263,6 +335,11 @@ async function buildQuestionImportBatchDetail(
     templateType: batch.templateType,
     status: batch.status,
     draftCount: batch.draftCount,
+    totalSourceRows: batch.totalSourceRows,
+    processedSourceRows: batch.processedSourceRows,
+    totalChunks: batch.totalChunks,
+    processedChunks: batch.processedChunks,
+    currentConcurrency: batch.currentConcurrency,
     lastError: batch.lastError,
     createdAt: batch.createdAt.toISOString(),
     parsedAt: batch.parsedAt?.toISOString() ?? null,
@@ -365,9 +442,12 @@ function normalizeStructuredRowRecord(
     option_f: (record.option_f ?? "").trim() || undefined,
     correct_answer: String(record.correct_answer ?? ""),
     analysis:
-      lawSourceValue || inferredLawSource ? undefined : analysisValue || undefined,
+      lawSourceValue || inferredLawSource
+        ? undefined
+        : analysisValue || undefined,
     law_source: lawSourceValue || inferredLawSource || undefined,
-    sort_order: normalizeSortOrderValue(record.sort_order ?? "") ?? fallbackSortOrder,
+    sort_order:
+      normalizeSortOrderValue(record.sort_order ?? "") ?? fallbackSortOrder,
   });
 }
 
@@ -596,11 +676,14 @@ export function parseStandardTemplateDrafts(
   return {
     templateType: QuestionImportTemplateType.STANDARD,
     drafts: normalizedDrafts,
-    sourceRows: buildSourceRowStatuses(rows, normalizedDrafts, failedRows, [rows[0].rowNumber]),
+    sourceRows: buildSourceRowStatuses(rows, normalizedDrafts, failedRows, [
+      rows[0].rowNumber,
+    ]),
   } satisfies Omit<ParsedWorkbookResult, "sourceSheetName">;
 }
 
 function buildAiChunks(rows: SheetRow[]) {
+  const env = getServerEnv();
   const chunks: SheetRow[][] = [];
   let currentChunk: SheetRow[] = [];
   let currentLength = 0;
@@ -611,8 +694,8 @@ function buildAiChunks(rows: SheetRow[]) {
       currentLength + rowText.length + (currentChunk.length > 0 ? 1 : 0);
 
     if (
-      currentChunk.length >= aiChunkRowLimit ||
-      nextLength > aiChunkTextLimit
+      currentChunk.length >= env.AI_SPLIT_CHUNK_ROW_LIMIT ||
+      nextLength > env.AI_SPLIT_CHUNK_TEXT_LIMIT
     ) {
       if (currentChunk.length > 0) {
         chunks.push(currentChunk);
@@ -672,7 +755,10 @@ async function parseAiChunkRows(
     }
 
     if (rows.length === 1) {
-      const fallbackDraft = tryParseSingleRowFallback(rows[0], startingSortOrder);
+      const fallbackDraft = tryParseSingleRowFallback(
+        rows[0],
+        startingSortOrder,
+      );
       if (fallbackDraft) {
         logger.warn(
           {
@@ -710,12 +796,18 @@ async function parseAiChunkRows(
     );
 
     const middleIndex = Math.ceil(rows.length / 2);
-    const left = await parseAiChunkRows(rows.slice(0, middleIndex), startingSortOrder);
+    const left = await parseAiChunkRows(
+      rows.slice(0, middleIndex),
+      startingSortOrder,
+    );
     const nextSortOrder = Math.max(
       startingSortOrder,
       ...left.drafts.map((draft) => draft.sortOrder + 1),
     );
-    const right = await parseAiChunkRows(rows.slice(middleIndex), nextSortOrder);
+    const right = await parseAiChunkRows(
+      rows.slice(middleIndex),
+      nextSortOrder,
+    );
 
     return {
       drafts: [...left.drafts, ...right.drafts],
@@ -725,23 +817,70 @@ async function parseAiChunkRows(
 }
 
 async function parseRowsWithAi(
+  batchId: string,
   rows: SheetRow[],
   startingSortOrder: number,
 ) {
-  const drafts: QuestionImportDraftInput[] = [];
-  const failedRows: FailedSourceRow[] = [];
-  let nextSortOrder = startingSortOrder;
+  const env = getServerEnv();
+  const chunks = buildAiChunks(rows);
+  const controller = new AiSplitConcurrencyController();
 
-  for (const chunkRows of buildAiChunks(rows)) {
-    const parsed = await parseAiChunkRows(chunkRows, nextSortOrder);
-    drafts.push(...parsed.drafts);
-    failedRows.push(...parsed.failedRows);
-    nextSortOrder = Math.max(
-      nextSortOrder,
-      ...parsed.drafts.map((draft) => draft.sortOrder + 1),
-    );
-  }
+  await initializeBatchProgress(batchId, {
+    totalSourceRows: rows.length,
+    processedSourceRows: 0,
+    totalChunks: chunks.length,
+    processedChunks: 0,
+    currentConcurrency: controller.getLimit(),
+  });
 
+  const chunkResults = await mapWithAdaptiveConcurrency(
+    chunks,
+    controller,
+    async (chunkRows): Promise<ParsedAiChunkResult> => {
+      let rateLimitRecoveries = 0;
+
+      while (true) {
+        try {
+          const parsed = await parseAiChunkRows(chunkRows, startingSortOrder);
+          await controller.recordSuccess({
+            onStateChange: async (state) => {
+              await syncBatchProcessingProgress(batchId, {
+                currentConcurrency: state.currentConcurrency,
+              });
+            },
+          });
+          await syncBatchProcessingProgress(batchId, {
+            processedSourceRowsIncrement: chunkRows.length,
+            processedChunksIncrement: 1,
+            currentConcurrency: controller.getLimit(),
+          });
+          return parsed;
+        } catch (error) {
+          if (!isAiRateLimitError(error)) {
+            throw error;
+          }
+
+          rateLimitRecoveries += 1;
+          await controller.recordRateLimit({
+            onStateChange: async (state) => {
+              await syncBatchProcessingProgress(batchId, {
+                currentConcurrency: state.currentConcurrency,
+              });
+            },
+          });
+
+          if (rateLimitRecoveries > env.AI_SPLIT_MAX_RETRIES + 2) {
+            throw error;
+          }
+
+          await controller.waitForCooldown();
+        }
+      }
+    },
+  );
+
+  const drafts = chunkResults.flatMap((item) => item.drafts);
+  const failedRows = chunkResults.flatMap((item) => item.failedRows);
   const normalizedDrafts = normalizeDraftSortOrders(drafts, startingSortOrder);
   return {
     templateType: QuestionImportTemplateType.AI,
@@ -750,7 +889,11 @@ async function parseRowsWithAi(
   } satisfies Omit<ParsedWorkbookResult, "sourceSheetName">;
 }
 
-async function parseWorkbookToDrafts(bankId: string, buffer: Buffer) {
+async function parseWorkbookToDrafts(
+  bankId: string,
+  batchId: string,
+  buffer: Buffer,
+) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const firstSheetName = workbook.SheetNames[0];
 
@@ -775,7 +918,17 @@ async function parseWorkbookToDrafts(bankId: string, buffer: Buffer) {
 
   const parsed = isStandardTemplate(rows)
     ? parseStandardTemplateDrafts(rows, startingSortOrder)
-    : await parseRowsWithAi(rows, startingSortOrder);
+    : await parseRowsWithAi(batchId, rows, startingSortOrder);
+
+  if (parsed.templateType === QuestionImportTemplateType.STANDARD) {
+    await initializeBatchProgress(batchId, {
+      totalSourceRows: rows.length,
+      processedSourceRows: rows.length,
+      totalChunks: standardTemplateChunkCount,
+      processedChunks: standardTemplateChunkCount,
+      currentConcurrency: 0,
+    });
+  }
 
   return {
     sourceSheetName: firstSheetName,
@@ -839,42 +992,71 @@ export async function listQuestionImportBatchesForAdmin(
   page: number,
   pageSize: number,
 ) {
-  const safePage = Math.max(page, 1);
-  const safePageSize = Math.min(Math.max(pageSize, 1), 100);
-  const skip = (safePage - 1) * safePageSize;
+  const total = await prisma.questionImportBatch.count({
+    where: {
+      bankId,
+    },
+  });
+  const {
+    page: safePage,
+    pageSize: safePageSize,
+    skip,
+    take,
+  } = resolvePagination(page, pageSize, total);
 
-  const [items, total] = await prisma.$transaction([
-    prisma.questionImportBatch.findMany({
-      where: {
-        bankId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      skip,
-      take: safePageSize,
-      select: {
-        id: true,
-        fileName: true,
-        sourceSheetName: true,
-        templateType: true,
-        status: true,
-        draftCount: true,
-        lastError: true,
-        createdAt: true,
-        parsedAt: true,
-        confirmedAt: true,
-      },
-    }),
-    prisma.questionImportBatch.count({
-      where: {
-        bankId,
-      },
-    }),
-  ]);
+  const items = await prisma.questionImportBatch.findMany({
+    where: {
+      bankId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    skip,
+    take,
+    select: {
+      id: true,
+      fileName: true,
+      sourceSheetName: true,
+      templateType: true,
+      status: true,
+      draftCount: true,
+      totalSourceRows: true,
+      processedSourceRows: true,
+      totalChunks: true,
+      processedChunks: true,
+      currentConcurrency: true,
+      lastError: true,
+      createdAt: true,
+      parsedAt: true,
+      confirmedAt: true,
+    },
+  });
 
   return {
     items: items.map(mapBatchSummary),
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+  };
+}
+
+export async function getQuestionImportBatchListMetaForAdmin(
+  bankId: string,
+  page: number,
+  pageSize: number,
+) {
+  const total = await prisma.questionImportBatch.count({
+    where: {
+      bankId,
+    },
+  });
+  const { page: safePage, pageSize: safePageSize } = resolvePagination(
+    page,
+    pageSize,
+    total,
+  );
+
+  return {
     total,
     page: safePage,
     pageSize: safePageSize,
@@ -993,7 +1175,9 @@ export async function confirmQuestionImportBatch(
       sortOrder: true,
     },
   });
-  const usedSortOrders = new Set(existingQuestions.map((item) => item.sortOrder));
+  const usedSortOrders = new Set(
+    existingQuestions.map((item) => item.sortOrder),
+  );
   let nextSortOrder =
     existingQuestions.reduce(
       (maxValue, item) => Math.max(maxValue, item.sortOrder),
@@ -1125,9 +1309,7 @@ export async function confirmQuestionImportBatch(
       });
     }
 
-    for (const questionId of result.questionIds) {
-      await refreshQuestionEmbedding(questionId);
-    }
+    await refreshQuestionEmbeddings(result.questionIds);
 
     await enqueueJob(JobType.REBUILD_QUESTION_MATCH, {
       bankId: result.bankId,
@@ -1172,6 +1354,7 @@ export async function markQuestionImportBatchFailed(
     data: {
       status: QuestionImportBatchStatus.FAILED,
       parsedAt: new Date(),
+      currentConcurrency: 0,
       lastError: message.trim() || "导题解析失败",
     },
   });
@@ -1200,12 +1383,17 @@ export async function processQuestionImportBatch(batchId: string) {
       confirmedAt: null,
       templateType: null,
       sourceSheetName: null,
+      totalSourceRows: 0,
+      processedSourceRows: 0,
+      totalChunks: 0,
+      processedChunks: 0,
+      currentConcurrency: 0,
     },
   });
 
   try {
     const buffer = await readStoredFile(batch.storagePath);
-    const parsed = await parseWorkbookToDrafts(batch.bankId, buffer);
+    const parsed = await parseWorkbookToDrafts(batch.bankId, batchId, buffer);
 
     await prisma.$transaction(async (tx) => {
       await tx.questionImportDraft.deleteMany({
@@ -1231,7 +1419,8 @@ export async function processQuestionImportBatch(batchId: string) {
             analysis: draft.analysis || null,
             lawSource: draft.lawSource || null,
             sortOrder: draft.sortOrder,
-            sourceLabel: draft.sourceLabel || buildSourceRowLabel(draft.sourceRowNumbers),
+            sourceLabel:
+              draft.sourceLabel || buildSourceRowLabel(draft.sourceRowNumbers),
             sourceContent: draft.sourceContent || null,
             sourceRowNumbers: draft.sourceRowNumbers,
           })),
@@ -1266,6 +1455,7 @@ export async function processQuestionImportBatch(batchId: string) {
               : "未识别出可确认的题目，请检查来源行判定结果",
           parsedAt: new Date(),
           draftCount: parsed.drafts.length,
+          currentConcurrency: 0,
         },
       });
     });

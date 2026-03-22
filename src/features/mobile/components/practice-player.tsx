@@ -16,6 +16,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   const [selectedAnswers, setSelectedAnswers] = useState<string[]>(
     initialView.currentQuestion?.selectedAnswers ?? [],
   );
+  const [isInteractive, setIsInteractive] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -24,6 +25,10 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     setSelectedAnswers(view.currentQuestion?.selectedAnswers ?? []);
     setFeedbackMessage("");
   }, [view]);
+
+  useEffect(() => {
+    setIsInteractive(true);
+  }, []);
 
   async function submitAnswer() {
     if (!view.currentQuestion || submitting) {
@@ -102,10 +107,18 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
           <p>当前会话里已经没有待作答题目，可以返回题库列表继续新的练习。</p>
         </div>
         <div className="inline-actions">
-          <Link href="/m/banks" className="mobile-button is-primary">
+          <Link
+            href="/m/banks"
+            className="mobile-button is-primary"
+            prefetch={false}
+          >
             返回题库列表
           </Link>
-          <Link href="/m/wrong-books" className="mobile-button">
+          <Link
+            href="/m/wrong-books"
+            className="mobile-button"
+            prefetch={false}
+          >
             查看错题本
           </Link>
         </div>
@@ -117,14 +130,26 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   const hasSubmitted = view.currentQuestion.isCorrect !== null;
 
   return (
-    <div className={hasSubmitted ? "list-grid mobile-practice-layout" : "list-grid"}>
+    <div
+      className={
+        hasSubmitted ? "list-grid mobile-practice-layout" : "list-grid"
+      }
+    >
       <section className="mobile-panel" style={{ padding: 24 }}>
         <div className="mobile-page-header">
           <div className="inline-actions" style={{ marginBottom: 10 }}>
-            <Link href="/m/banks" className="mobile-button is-small">
+            <Link
+              href="/m/banks"
+              className="mobile-button is-small"
+              prefetch={false}
+            >
               返回题库列表
             </Link>
-            <Link href="/m/wrong-books" className="mobile-button is-small">
+            <Link
+              href="/m/wrong-books"
+              className="mobile-button is-small"
+              prefetch={false}
+            >
               错题本
             </Link>
           </div>
@@ -154,7 +179,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                       : "mobile-choice-button"
                   }
                   onClick={() => {
-                    if (hasSubmitted) {
+                    if (hasSubmitted || !isInteractive) {
                       return;
                     }
 
@@ -169,25 +194,37 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
 
                     setSelectedAnswers([item.label]);
                   }}
-                  disabled={hasSubmitted}
+                  disabled={hasSubmitted || !isInteractive}
                 >
                   {item.label}. {item.text}
                 </button>
               );
             })}
           </div>
+          {!isInteractive ? (
+            <div className="action-loading-notice">
+              <strong>正在准备答题页面</strong>
+              <span>答题按钮初始化完成后即可开始作答，请稍候。</span>
+            </div>
+          ) : null}
           {feedbackMessage ? (
             <div className="mobile-feedback is-error">{feedbackMessage}</div>
+          ) : null}
+          {submitting ? (
+            <div className="action-loading-notice">
+              <strong>正在提交答案并判定结果</strong>
+              <span>请稍候，系统会在判题完成后展示本题结果。</span>
+            </div>
           ) : null}
           {!hasSubmitted ? (
             <button
               type="button"
               className="mobile-button is-primary is-block"
-              disabled={selectedAnswers.length === 0}
-              aria-busy={submitting}
+              disabled={selectedAnswers.length === 0 || !isInteractive}
+              aria-busy={!isInteractive || submitting}
               onClick={submitAnswer}
             >
-              {submitting ? "提交中..." : "提交答案"}
+              {!isInteractive ? "页面准备中..." : submitting ? "提交中..." : "提交答案"}
             </button>
           ) : null}
         </div>
@@ -231,17 +268,23 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
             {feedbackMessage ? (
               <div className="mobile-feedback is-error">{feedbackMessage}</div>
             ) : null}
+            {advancing ? (
+              <div className="action-loading-notice">
+                <strong>正在加载下一题</strong>
+                <span>题目加载完成后会自动更新当前页面。</span>
+              </div>
+            ) : null}
             <div className="inline-actions">
               <button
                 type="button"
                 className="mobile-button is-primary"
                 onClick={nextQuestion}
-                disabled={advancing}
-                aria-busy={advancing}
+                disabled={advancing || !isInteractive}
+                aria-busy={advancing || !isInteractive}
               >
-                {advancing ? "加载中..." : "下一题"}
+                {!isInteractive ? "页面准备中..." : advancing ? "加载中..." : "下一题"}
               </button>
-              <Link href="/m/banks" className="mobile-button">
+              <Link href="/m/banks" className="mobile-button" prefetch={false}>
                 返回题库列表
               </Link>
             </div>

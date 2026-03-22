@@ -18,9 +18,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           },
         }}
       >
-        <AntdApp>
-          {children}
-        </AntdApp>
+        <AntdApp>{children}</AntdApp>
       </ConfigProvider>
     </AntdRegistry>
   );

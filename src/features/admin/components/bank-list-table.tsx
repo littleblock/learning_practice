@@ -26,13 +26,13 @@ export function BankListTable({ banks }: BankListTableProps) {
       <table className="admin-table is-bank-table">
         <thead>
           <tr>
-            <th>名称</th>
-            <th>编码</th>
-            <th>状态</th>
-            <th>排序</th>
-            <th>题目</th>
-            <th>法条</th>
-            <th>操作</th>
+            <th style={{ width: "32%" }}>名称</th>
+            <th style={{ width: 180 }}>编码</th>
+            <th style={{ width: 120 }}>状态</th>
+            <th style={{ width: 96 }}>排序</th>
+            <th style={{ width: 96 }}>题目</th>
+            <th style={{ width: 96 }}>法条</th>
+            <th style={{ width: 260 }}>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -65,6 +65,7 @@ export function BankListTable({ banks }: BankListTableProps) {
                     <Link
                       href={`/admin/banks/${bank.id}/edit`}
                       className="admin-table-link"
+                      prefetch={false}
                     >
                       编辑
                     </Link>
@@ -72,6 +73,7 @@ export function BankListTable({ banks }: BankListTableProps) {
                     <Link
                       href={`/admin/banks/${bank.id}/questions`}
                       className="admin-table-link"
+                      prefetch={false}
                     >
                       题目管理
                     </Link>
@@ -79,6 +81,7 @@ export function BankListTable({ banks }: BankListTableProps) {
                     <Link
                       href={`/admin/banks/${bank.id}/statutes`}
                       className="admin-table-link"
+                      prefetch={false}
                     >
                       法条资料
                     </Link>

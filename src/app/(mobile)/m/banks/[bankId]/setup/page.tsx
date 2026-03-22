@@ -21,7 +21,7 @@ export default async function PracticeSetupPage({
           <h1>题库不可用</h1>
           <p>当前题库不存在或已停用，请返回题库列表重新选择。</p>
         </div>
-        <Link href="/m/banks" className="mobile-button">
+        <Link href="/m/banks" className="mobile-button" prefetch={false}>
           返回题库列表
         </Link>
       </section>
@@ -32,7 +32,11 @@ export default async function PracticeSetupPage({
     <section className="mobile-panel" style={{ padding: 24 }}>
       <div className="mobile-page-header">
         <div className="inline-actions" style={{ marginBottom: 10 }}>
-          <Link href="/m/banks" className="mobile-button is-small">
+          <Link
+            href="/m/banks"
+            className="mobile-button is-small"
+            prefetch={false}
+          >
             返回题库列表
           </Link>
         </div>

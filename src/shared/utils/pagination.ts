@@ -7,7 +7,9 @@ export function resolvePagination(
 ) {
   const safePageSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
   const totalPages =
-    total === undefined ? undefined : Math.max(1, Math.ceil(total / safePageSize));
+    total === undefined
+      ? undefined
+      : Math.max(1, Math.ceil(total / safePageSize));
   const safePage = totalPages
     ? Math.min(Math.max(page, 1), totalPages)
     : Math.max(page, 1);

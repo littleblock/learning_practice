@@ -23,12 +23,16 @@ export function BankManagementCard({ bank }: BankManagementCardProps) {
       <div className="mobile-page-header">
         <h1 style={{ fontSize: 24 }}>{bank.name}</h1>
         <p>
-          编码：{bank.code} | 状态：{bank.status === BankStatus.ACTIVE ? "启用" : "停用"} | 排序：
+          编码：{bank.code} | 状态：
+          {bank.status === BankStatus.ACTIVE ? "启用" : "停用"} | 排序：
           {bank.sortOrder}
         </p>
       </div>
 
-      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div
+        className="stats-grid"
+        style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+      >
         <div className="stat-card">
           题目数量
           <strong>{bank.questionCount}</strong>

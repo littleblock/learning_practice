@@ -6,7 +6,10 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 
-import { MATCH_SCORE_THRESHOLD, WRONG_BOOK_RECOVERY_COUNT } from "@/shared/constants/app";
+import {
+  MATCH_SCORE_THRESHOLD,
+  WRONG_BOOK_RECOVERY_COUNT,
+} from "@/shared/constants/app";
 import {
   createPracticeSessionSchema,
   submitPracticeAnswerSchema,
@@ -38,20 +41,29 @@ function shuffle<T>(items: T[]) {
   return cloned;
 }
 
-function orderQuestionIds(questionIds: Array<{ id: string; sortOrder: number }>, practiceMode: PracticeMode) {
+function orderQuestionIds(
+  questionIds: Array<{ id: string; sortOrder: number }>,
+  practiceMode: PracticeMode,
+) {
   if (practiceMode === PracticeMode.REVERSE) {
-    return [...questionIds].sort((left, right) => right.sortOrder - left.sortOrder);
+    return [...questionIds].sort(
+      (left, right) => right.sortOrder - left.sortOrder,
+    );
   }
 
   if (practiceMode === PracticeMode.RANDOM) {
     return shuffle(questionIds);
   }
 
-  return [...questionIds].sort((left, right) => left.sortOrder - right.sortOrder);
+  return [...questionIds].sort(
+    (left, right) => left.sortOrder - right.sortOrder,
+  );
 }
 
 function buildPracticeSessionView(
-  session: NonNullable<Awaited<ReturnType<typeof getSessionWithCurrentQuestion>>>,
+  session: NonNullable<
+    Awaited<ReturnType<typeof getSessionWithCurrentQuestion>>
+  >,
 ): PracticeSessionView {
   const currentItem = session.items[session.currentIndex] ?? null;
   const latestAttempt = currentItem?.attempts[0] ?? null;
@@ -66,16 +78,20 @@ function buildPracticeSessionView(
         selectedAnswers: latestAttempt
           ? z.array(z.string()).parse(latestAttempt.selectedAnswers)
           : [],
-        correctAnswers: parseCorrectAnswers(currentItem.question.correctAnswers),
+        correctAnswers: parseCorrectAnswers(
+          currentItem.question.correctAnswers,
+        ),
         analysis: currentItem.question.analysis,
         lawSource: currentItem.question.lawSource,
         isCorrect: latestAttempt?.isCorrect ?? null,
         matchedExcerpt:
-          currentItem.question.statuteMatch && currentItem.question.statuteMatch.score >= MATCH_SCORE_THRESHOLD
+          currentItem.question.statuteMatch &&
+          currentItem.question.statuteMatch.score >= MATCH_SCORE_THRESHOLD
             ? currentItem.question.statuteMatch.excerpt
             : null,
         matchedScore:
-          currentItem.question.statuteMatch && currentItem.question.statuteMatch.score >= MATCH_SCORE_THRESHOLD
+          currentItem.question.statuteMatch &&
+          currentItem.question.statuteMatch.score >= MATCH_SCORE_THRESHOLD
             ? currentItem.question.statuteMatch.score
             : null,
       }
@@ -95,7 +111,11 @@ function buildPracticeSessionView(
   };
 }
 
-async function getQuestionIdsForPractice(userId: string, bankId: string, sourceType: PracticeSourceType) {
+async function getQuestionIdsForPractice(
+  userId: string,
+  bankId: string,
+  sourceType: PracticeSourceType,
+) {
   if (sourceType === PracticeSourceType.WRONG_BOOK) {
     const stats = await prisma.userQuestionStat.findMany({
       where: {
@@ -168,7 +188,11 @@ export async function createPracticeSession(
   );
 
   if (orderedQuestions.length === 0) {
-    throw new Error(payload.sourceType === PracticeSourceType.WRONG_BOOK ? "当前没有错题可练习" : "当前题库还没有可练习的题目");
+    throw new Error(
+      payload.sourceType === PracticeSourceType.WRONG_BOOK
+        ? "当前没有错题可练习"
+        : "当前题库还没有可练习的题目",
+    );
   }
 
   await prisma.practiceSession.updateMany({
@@ -204,7 +228,10 @@ export async function createPracticeSession(
   return session;
 }
 
-export async function getPracticeSessionView(userId: string, sessionId: string) {
+export async function getPracticeSessionView(
+  userId: string,
+  sessionId: string,
+) {
   const session = await getSessionWithCurrentQuestion(sessionId, userId);
 
   if (!session) {
@@ -250,8 +277,14 @@ export async function submitCurrentAnswer(
   }
 
   const selectedAnswers = normalizeAnswerValues(payload.selectedAnswers);
-  const correctAnswers = parseCorrectAnswers(currentItem.question.correctAnswers);
-  const isCorrect = isAnswerCorrect(currentItem.question.type, selectedAnswers, correctAnswers);
+  const correctAnswers = parseCorrectAnswers(
+    currentItem.question.correctAnswers,
+  );
+  const isCorrect = isAnswerCorrect(
+    currentItem.question.type,
+    selectedAnswers,
+    correctAnswers,
+  );
   const isLastQuestion = session.currentIndex >= session.totalCount - 1;
 
   await prisma.$transaction(async (transaction) => {
@@ -281,7 +314,8 @@ export async function submitCurrentAnswer(
       const nextWrongBookState = resolveWrongBookState(
         {
           isInWrongBook: currentStat.isInWrongBook,
-          consecutiveCorrectInWrongBook: currentStat.consecutiveCorrectInWrongBook,
+          consecutiveCorrectInWrongBook:
+            currentStat.consecutiveCorrectInWrongBook,
         },
         isCorrect,
         WRONG_BOOK_RECOVERY_COUNT,
@@ -300,7 +334,8 @@ export async function submitCurrentAnswer(
                 increment: 1,
               }
             : undefined,
-          consecutiveCorrectInWrongBook: nextWrongBookState.consecutiveCorrectInWrongBook,
+          consecutiveCorrectInWrongBook:
+            nextWrongBookState.consecutiveCorrectInWrongBook,
           isInWrongBook: nextWrongBookState.isInWrongBook,
           lastResultCorrect: isCorrect,
           lastAnsweredAt: new Date(),
@@ -330,7 +365,9 @@ export async function submitCurrentAnswer(
         submittedCount: {
           increment: 1,
         },
-        status: isLastQuestion ? PracticeSessionStatus.COMPLETED : PracticeSessionStatus.IN_PROGRESS,
+        status: isLastQuestion
+          ? PracticeSessionStatus.COMPLETED
+          : PracticeSessionStatus.IN_PROGRESS,
         completedAt: isLastQuestion ? new Date() : null,
         lastAccessedAt: new Date(),
       },

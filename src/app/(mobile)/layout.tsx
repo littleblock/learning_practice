@@ -1,6 +1,10 @@
 import { MobileShellHeader } from "@/features/mobile/components/mobile-shell-header";
 
-export default function MobileLayout({ children }: { children: React.ReactNode }) {
+export default function MobileLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <div className="mobile-shell">
       <MobileShellHeader />

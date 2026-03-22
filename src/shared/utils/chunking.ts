@@ -6,7 +6,11 @@ export interface TextChunk {
   preview: string;
 }
 
-export function chunkText(content: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP) {
+export function chunkText(
+  content: string,
+  chunkSize = CHUNK_SIZE,
+  overlap = CHUNK_OVERLAP,
+) {
   const normalized = content.replace(/\r\n/g, "\n").trim();
 
   if (!normalized) {

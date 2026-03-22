@@ -33,7 +33,9 @@ const aiQuestionDraftSchema = z.object({
     .min(1),
   analysis: z.string().trim().nullable().optional(),
   lawSource: z.string().trim().nullable().optional(),
-  sortOrder: z.union([z.number().int().min(1), z.string().trim().min(1)]).optional(),
+  sortOrder: z
+    .union([z.number().int().min(1), z.string().trim().min(1)])
+    .optional(),
   sourceLabel: z.string().trim().nullable().optional(),
   sourceContent: z.string().trim().nullable().optional(),
   sourceRowNumbers: z
@@ -131,7 +133,8 @@ function normalizeMessageContent(
 function normalizeFetchError(error: unknown, timeoutMs: number) {
   if (
     error instanceof Error &&
-    (error.name === "AbortError" || error.message === "This operation was aborted")
+    (error.name === "AbortError" ||
+      error.message === "This operation was aborted")
   ) {
     return new Error(`AI 拆题请求超时（${timeoutMs}ms）`);
   }
@@ -165,7 +168,9 @@ function formatSourceRowLabel(sourceRowNumbers: number[]) {
 }
 
 function buildChunkText(rows: AiSourceRowInput[]) {
-  return rows.map((row) => `第 ${row.rowNumber} 行 | ${row.content}`).join("\n");
+  return rows
+    .map((row) => `第 ${row.rowNumber} 行 | ${row.content}`)
+    .join("\n");
 }
 
 function normalizeOptionLabel(index: number) {
@@ -192,7 +197,9 @@ function normalizeOptionList(
 
     const fallbackLabel = normalizeOptionLabel(index);
     const label = option.label?.trim().toUpperCase() || fallbackLabel;
-    const text = stripOptionPrefix(option.text?.trim() || option.label?.trim() || "");
+    const text = stripOptionPrefix(
+      option.text?.trim() || option.label?.trim() || "",
+    );
 
     if (!text) {
       throw new Error("AI 返回的选项内容为空");
@@ -233,6 +240,16 @@ function normalizeSourceRowNumbers(
         .filter((rowNumber) => allowedRowNumbers.has(rowNumber)),
     ),
   ).sort((left, right) => left - right);
+}
+
+export function isAiRateLimitError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /429|rate limit|limit exceeded|限流|并发/.test(
+    error.message.toLowerCase(),
+  );
 }
 
 function normalizeSortOrderValue(
@@ -351,11 +368,11 @@ export async function splitQuestionsWithAi(
           "你是题库导入助手。",
           "请根据带行号的 Excel 原始内容识别可以纳入题库的题目。",
           "只返回 JSON，不要输出解释、前后缀或 Markdown。",
-          "返回格式必须是数组或 {\"questions\": [...]}。",
+          '返回格式必须是数组或 {"questions": [...]}。',
           "每道题只允许包含字段：type、stem、options、correctAnswers、analysis、lawSource、sortOrder、sourceLabel、sourceContent、sourceRowNumbers。",
           "type 只能是 single、multiple、judge。",
-          "options 优先返回 [{\"label\":\"A\",\"text\":\"选项内容\"}]，不要只返回字符串数组。",
-          "correctAnswers 必须返回选项标识数组，例如 [\"A\"] 或 [\"A\", \"C\"]。",
+          'options 优先返回 [{"label":"A","text":"选项内容"}]，不要只返回字符串数组。',
+          'correctAnswers 必须返回选项标识数组，例如 ["A"] 或 ["A", "C"]。',
           "sourceRowNumbers 必须填写实际使用到的原始行号数组。",
           "如果某些行不能形成完整题目，直接忽略，不要输出占位记录。",
         ].join(""),

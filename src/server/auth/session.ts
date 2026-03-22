@@ -4,7 +4,10 @@ import { UserRole } from "@prisma/client";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "@/shared/constants/app";
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
+} from "@/shared/constants/app";
 import { prisma } from "@/server/db/client";
 import { getServerEnv } from "@/server/env";
 
@@ -96,7 +99,11 @@ export async function getCurrentSession() {
   } satisfies AuthenticatedSession;
 }
 
-export function applySessionCookie(response: NextResponse, token: string, expiresAt: Date) {
+export function applySessionCookie(
+  response: NextResponse,
+  token: string,
+  expiresAt: Date,
+) {
   const { COOKIE_SECURE } = getServerEnv();
 
   response.cookies.set({

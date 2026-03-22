@@ -17,6 +17,21 @@ const serverEnvSchema = z.object({
   AI_SPLIT_MODEL: z.string().default("glm-4.7"),
   AI_SPLIT_TIMEOUT_MS: z.coerce.number().int().min(1000).default(60000),
   AI_SPLIT_MAX_RETRIES: z.coerce.number().int().min(1).max(5).default(2),
+  AI_SPLIT_CONCURRENCY_INITIAL: z.coerce.number().int().min(1).default(3),
+  AI_SPLIT_CONCURRENCY_MIN: z.coerce.number().int().min(1).default(1),
+  AI_SPLIT_CONCURRENCY_MAX: z.coerce.number().int().min(1).default(6),
+  AI_SPLIT_SCALE_UP_SUCCESS_THRESHOLD: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(6),
+  AI_SPLIT_RATE_LIMIT_COOLDOWN_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(15000),
+  AI_SPLIT_CHUNK_ROW_LIMIT: z.coerce.number().int().min(1).default(8),
+  AI_SPLIT_CHUNK_TEXT_LIMIT: z.coerce.number().int().min(200).default(5000),
   APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   ENABLE_SENTRY: z
     .enum(["true", "false"])

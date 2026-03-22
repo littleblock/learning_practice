@@ -2,7 +2,7 @@
 
 import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useRef, useState, useTransition } from "react";
 
 export function StatuteUploadForm({ bankId }: { bankId: string }) {
   const router = useRouter();
@@ -11,6 +11,7 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [isRefreshing, startRefreshTransition] = useTransition();
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,9 +40,9 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
         method: "POST",
         body: formData,
       });
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
 
       if (!response.ok) {
         setErrorMessage(payload.message ?? "上传失败");
@@ -53,7 +54,9 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
       }
       setTitle("");
       setSuccessMessage("资料已上传，系统会异步拆分文本并重建法条匹配结果。");
-      router.refresh();
+      startRefreshTransition(() => {
+        router.refresh();
+      });
     } catch {
       setErrorMessage("上传失败，请稍后重试");
     } finally {
@@ -75,7 +78,12 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
       {successMessage ? (
         <div style={{ color: "var(--success)" }}>{successMessage}</div>
       ) : null}
-      <Button htmlType="submit" type="primary" loading={isUploading}>
+      <Button
+        htmlType="submit"
+        type="primary"
+        loading={isUploading || isRefreshing}
+        disabled={isUploading || isRefreshing}
+      >
         上传资料
       </Button>
     </form>

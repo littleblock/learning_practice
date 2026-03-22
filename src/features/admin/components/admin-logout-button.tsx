@@ -27,7 +27,6 @@ export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
       }
 
       router.replace("/admin/login");
-      router.refresh();
     } catch {
       window.alert("退出登录失败，请稍后重试");
     } finally {
@@ -41,7 +40,9 @@ export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
       type={compact ? "text" : "default"}
       icon={<LogoutOutlined />}
       aria-label="退出登录"
-      className={compact ? "admin-logout-button is-compact" : "admin-logout-button"}
+      className={
+        compact ? "admin-logout-button is-compact" : "admin-logout-button"
+      }
       loading={isSubmitting}
       onClick={handleLogout}
     >

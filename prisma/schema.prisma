@@ -177,6 +177,11 @@ model QuestionImportBatch {
   status         QuestionImportBatchStatus  @default(PENDING)
   lastError      String?                    @db.Text
   draftCount     Int                        @default(0)
+  totalSourceRows Int                       @default(0)
+  processedSourceRows Int                   @default(0)
+  totalChunks    Int                        @default(0)
+  processedChunks Int                       @default(0)
+  currentConcurrency Int                    @default(0)
   createdAt      DateTime                   @default(now())
   updatedAt      DateTime                   @updatedAt
   parsedAt       DateTime?

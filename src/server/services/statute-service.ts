@@ -3,7 +3,10 @@ import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 
 import { STATUTE_MAX_SIZE_BYTES } from "@/shared/constants/app";
-import { statuteListQuerySchema, statuteUploadMetadataSchema } from "@/shared/schemas/statute";
+import {
+  statuteListQuerySchema,
+  statuteUploadMetadataSchema,
+} from "@/shared/schemas/statute";
 import type { StatuteDocumentListItem } from "@/shared/types/domain";
 import { chunkText } from "@/shared/utils/chunking";
 import { isAllowedStatuteFile } from "@/shared/utils/file";
@@ -17,7 +20,11 @@ import {
   rebuildQuestionMatchesForBank,
   saveStatuteChunkEmbedding,
 } from "@/server/services/matching-service";
-import { deleteStoredFile, readStoredFile, saveUploadedFile } from "@/server/storage/file-storage";
+import {
+  deleteStoredFile,
+  readStoredFile,
+  saveUploadedFile,
+} from "@/server/storage/file-storage";
 
 async function extractDocumentText(storagePath: string, fileName: string) {
   const buffer = await readStoredFile(storagePath);
@@ -84,7 +91,11 @@ export async function listStatuteDocuments(bankId: string, rawQuery: unknown) {
   };
 }
 
-export async function uploadStatuteDocument(bankId: string, title: string, file: File) {
+export async function uploadStatuteDocument(
+  bankId: string,
+  title: string,
+  file: File,
+) {
   const metadata = statuteUploadMetadataSchema.parse({ title });
   await assertBankExists(bankId);
 
@@ -110,12 +121,17 @@ export async function uploadStatuteDocument(bankId: string, title: string, file:
     },
   });
 
-  await enqueueJob(JobType.PROCESS_STATUTE_DOCUMENT, { documentId: document.id });
+  await enqueueJob(JobType.PROCESS_STATUTE_DOCUMENT, {
+    documentId: document.id,
+  });
 
   return document;
 }
 
-export async function deleteStatuteDocumentById(bankId: string, documentId: string) {
+export async function deleteStatuteDocumentById(
+  bankId: string,
+  documentId: string,
+) {
   const document = await prisma.statuteDocument.findFirst({
     where: {
       id: documentId,
@@ -155,7 +171,10 @@ export async function processStatuteDocument(documentId: string) {
   });
 
   try {
-    const text = await extractDocumentText(document.storagePath, document.fileName);
+    const text = await extractDocumentText(
+      document.storagePath,
+      document.fileName,
+    );
     const chunks = chunkText(text);
 
     await prisma.$transaction([
@@ -198,13 +217,17 @@ export async function processStatuteDocument(documentId: string) {
       },
     });
 
-    const embeddings = await embedTexts(savedChunks.map((chunk) => chunk.content));
+    const embeddings = await embedTexts(
+      savedChunks.map((chunk) => chunk.content),
+    );
 
     for (let index = 0; index < savedChunks.length; index += 1) {
       await saveStatuteChunkEmbedding(savedChunks[index].id, embeddings[index]);
     }
 
-    await enqueueJob(JobType.REBUILD_QUESTION_MATCH, { bankId: document.bankId });
+    await enqueueJob(JobType.REBUILD_QUESTION_MATCH, {
+      bankId: document.bankId,
+    });
   } catch (error) {
     logger.error({ error, documentId }, "法条资料处理失败");
 
@@ -220,6 +243,9 @@ export async function processStatuteDocument(documentId: string) {
   }
 }
 
-export async function rebuildMatchesForBank(bankId: string, questionIds?: string[]) {
+export async function rebuildMatchesForBank(
+  bankId: string,
+  questionIds?: string[],
+) {
   await rebuildQuestionMatchesForBank(bankId, questionIds);
 }

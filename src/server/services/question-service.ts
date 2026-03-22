@@ -13,10 +13,11 @@ import { enqueueJob } from "@/server/repositories/job-repository";
 import { refreshQuestionEmbedding } from "@/server/services/matching-service";
 import { normalizeQuestionInput } from "@/server/services/question-payload";
 
-export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
-  const query = questionListQuerySchema.parse(rawQuery);
-
-  const where: Prisma.QuestionWhereInput = {
+function buildQuestionListWhere(
+  bankId: string,
+  query: ReturnType<typeof questionListQuerySchema.parse>,
+): Prisma.QuestionWhereInput {
+  return {
     bankId,
     ...(query.keyword
       ? {
@@ -36,6 +37,60 @@ export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
         }
       : {}),
   };
+}
+
+export async function getQuestionListMetaForAdmin(
+  bankId: string,
+  rawQuery: unknown,
+) {
+  const query = questionListQuerySchema.parse(rawQuery);
+  const where = buildQuestionListWhere(bankId, query);
+  const [total, aggregate] = await prisma.$transaction([
+    prisma.question.count({ where }),
+    prisma.question.aggregate({
+      where: { bankId },
+      _max: {
+        sortOrder: true,
+      },
+    }),
+  ]);
+  const { page, pageSize } = resolvePagination(
+    query.page,
+    query.pageSize,
+    total,
+  );
+
+  return {
+    total,
+    page,
+    pageSize,
+    nextSortOrder: (aggregate._max.sortOrder ?? 0) + 1,
+  };
+}
+
+export async function getQuestionCountForAdmin(
+  bankId: string,
+  rawQuery: unknown,
+) {
+  const query = questionListQuerySchema.parse(rawQuery);
+  const where = buildQuestionListWhere(bankId, query);
+  const total = await prisma.question.count({ where });
+  const { page, pageSize } = resolvePagination(
+    query.page,
+    query.pageSize,
+    total,
+  );
+
+  return {
+    total,
+    page,
+    pageSize,
+  };
+}
+
+export async function listQuestionsForAdmin(bankId: string, rawQuery: unknown) {
+  const query = questionListQuerySchema.parse(rawQuery);
+  const where = buildQuestionListWhere(bankId, query);
 
   const [total, aggregate] = await prisma.$transaction([
     prisma.question.count({ where }),

@@ -3,15 +3,21 @@ import { BankStatus, QuestionType } from "@prisma/client";
 export function BankFilters({
   keyword,
   status,
+  pageSize,
 }: {
   keyword?: string;
   status?: string;
+  pageSize?: string;
 }) {
   return (
     <form
       action="/admin/banks"
       className="admin-filter-form admin-bank-filter-form"
     >
+      <input type="hidden" name="page" value="1" />
+      {pageSize ? (
+        <input type="hidden" name="pageSize" value={pageSize} />
+      ) : null}
       <input
         name="keyword"
         defaultValue={keyword}
@@ -47,9 +53,15 @@ export function QuestionFilters({
       action={`/admin/banks/${bankId}/questions`}
       className="admin-filter-form admin-question-filter-form"
     >
+      <input type="hidden" name="page" value="1" />
       {Object.entries(preservedQuery).map(([key, value]) =>
-        value ? <input key={key} type="hidden" name={key} value={value} /> : null,
+        value ? (
+          <input key={key} type="hidden" name={key} value={value} />
+        ) : null,
       )}
+      {pageSize ? (
+        <input type="hidden" name="pageSize" value={pageSize} />
+      ) : null}
       <input
         name="keyword"
         defaultValue={keyword}
@@ -66,11 +78,6 @@ export function QuestionFilters({
         defaultValue={lawSource}
         placeholder="按答案来源筛选"
       />
-      <select name="pageSize" defaultValue={pageSize ?? "20"}>
-        <option value="20">20 条/页</option>
-        <option value="50">50 条/页</option>
-        <option value="100">100 条/页</option>
-      </select>
       <button type="submit">筛选</button>
     </form>
   );

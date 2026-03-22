@@ -56,8 +56,10 @@ function toFormState(
   return {
     type: question.type,
     stem: question.stem,
-    optionA: optionMap.get("A") ?? (isJudge ? optionMap.get("T") ?? "正确" : ""),
-    optionB: optionMap.get("B") ?? (isJudge ? optionMap.get("F") ?? "错误" : ""),
+    optionA:
+      optionMap.get("A") ?? (isJudge ? (optionMap.get("T") ?? "正确") : ""),
+    optionB:
+      optionMap.get("B") ?? (isJudge ? (optionMap.get("F") ?? "错误") : ""),
     optionC: optionMap.get("C") ?? "",
     optionD: optionMap.get("D") ?? "",
     optionE: optionMap.get("E") ?? "",
@@ -137,7 +139,9 @@ export function QuestionEditorModal({
       const options = optionLabels
         .map((label) => ({
           label,
-          text: formState[`option${label}` as keyof QuestionFormState] as string,
+          text: formState[
+            `option${label}` as keyof QuestionFormState
+          ] as string,
         }))
         .filter((item) => item.text.trim().length > 0);
 
@@ -173,9 +177,9 @@ export function QuestionEditorModal({
         body: JSON.stringify(payload),
       });
 
-      const result = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
+      const result = (await response.json().catch(() => ({}))) as {
+        message?: string;
+      };
       if (!response.ok) {
         setErrorMessage(result.message ?? "保存题目失败");
         return;
@@ -279,7 +283,9 @@ export function QuestionEditorModal({
             <Input
               key={label}
               placeholder={`选项 ${label}`}
-              value={formState[`option${label}` as keyof QuestionFormState] as string}
+              value={
+                formState[`option${label}` as keyof QuestionFormState] as string
+              }
               onChange={(event) =>
                 setFormState((current) => ({
                   ...current,

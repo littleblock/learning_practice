@@ -12,7 +12,9 @@ export default async function WrongBooksPage() {
     (sum, item) => sum + item.wrongCount,
     0,
   );
-  const resumableCount = wrongBooks.filter((item) => item.resumeSessionId).length;
+  const resumableCount = wrongBooks.filter(
+    (item) => item.resumeSessionId,
+  ).length;
 
   return (
     <div className="list-grid">
@@ -43,7 +45,7 @@ export default async function WrongBooksPage() {
       </div>
 
       <div className="inline-actions">
-        <Link href="/m/banks" className="mobile-button">
+        <Link href="/m/banks" className="mobile-button" prefetch={false}>
           返回题库列表
         </Link>
       </div>
@@ -56,7 +58,11 @@ export default async function WrongBooksPage() {
 
       <div className="mobile-card-grid">
         {wrongBooks.map((item) => (
-          <section key={item.bankId} className="mobile-panel" style={{ padding: 24 }}>
+          <section
+            key={item.bankId}
+            className="mobile-panel"
+            style={{ padding: 24 }}
+          >
             <div className="mobile-page-header">
               <h1 style={{ fontSize: 22 }}>{item.bankName}</h1>
               <p>
@@ -72,6 +78,7 @@ export default async function WrongBooksPage() {
                 <Link
                   href={`/m/practice/${item.resumeSessionId}`}
                   className="mobile-button"
+                  prefetch={false}
                 >
                   继续上次错题练习
                 </Link>
