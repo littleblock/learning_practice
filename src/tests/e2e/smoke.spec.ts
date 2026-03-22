@@ -1,4 +1,18 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function setInputValue(page: Page, selector: string, value: string) {
+  await page.locator(selector).evaluate((element, nextValue) => {
+    const input = element as HTMLInputElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+
+    valueSetter?.call(input, nextValue);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
 
 test.describe("admin and mobile smoke flows", () => {
   test("root route redirects learners to the mobile login page", async ({
@@ -11,10 +25,12 @@ test.describe("admin and mobile smoke flows", () => {
   test("admin login and management pages are reachable", async ({ page }) => {
     await page.goto("/admin/login");
 
-    await page.locator('input[autocomplete="username"]').fill("admin");
-    await page
-      .locator('input[autocomplete="current-password"]')
-      .fill("123456");
+    await setInputValue(page, 'input[autocomplete="username"]', "admin");
+    await setInputValue(
+      page,
+      'input[autocomplete="current-password"]',
+      "123456",
+    );
     await page.locator('button[type="submit"]').click();
 
     await expect(page).toHaveURL(/\/admin\/banks$/, { timeout: 20_000 });
@@ -49,10 +65,12 @@ test.describe("admin and mobile smoke flows", () => {
   test("learner login and practice flow are reachable", async ({ page }) => {
     await page.goto("/m/login");
 
-    await page.locator('input[autocomplete="username"]').fill("syy");
-    await page
-      .locator('input[autocomplete="current-password"]')
-      .fill("study@123");
+    await setInputValue(page, 'input[autocomplete="username"]', "syy");
+    await setInputValue(
+      page,
+      'input[autocomplete="current-password"]',
+      "study@123",
+    );
     await page.locator('button[type="submit"]').click();
 
     await expect(page).toHaveURL(/\/m\/banks$/, { timeout: 20_000 });
