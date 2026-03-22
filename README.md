@@ -82,3 +82,42 @@ npx pnpm@10.8.0 run build
 - `prisma/migrations/20260318230000_init/migration.sql` 已包含 `pgvector` 扩展初始化。
 - Excel 导题采用异步任务，上传后会进入 `Job` 队列表。
 - 法条匹配只在导题、编辑题目、上传法条后离线重建，答题时直接读取缓存结果。
+
+## 生产部署约束
+
+当前阿里云生产服务器是低内存环境，而且还同时运行其他 PM2 服务。这个项目虽然业务上不复杂，但 `Next.js 15 + App Router + Ant Design + Prisma` 的生产构建阶段内存占用并不低，已经实测会在服务器上触发 OOM kill。因此，后续发布时不要把“登录服务器后直接执行 `pnpm build`”当成默认方案。
+
+推荐的固定发布流程如下：
+
+1. 在本地完成代码修改。
+2. 在本地执行 `npx pnpm@10.8.0 run typecheck`、测试和必要的页面验证。
+3. 在本地执行生产构建。
+4. 将源码、生产环境变量和构建产物上传到服务器。
+5. 服务器只执行 `prisma migrate deploy`、替换 `.next` 产物、`pm2 restart` 和 Nginx reload。
+
+当前生产环境约定如下：
+
+- 公网入口：`https://www.superconsultant.cn/apps/learning-practice`
+- 项目目录：`/app/learning_practice`
+- 上传目录：`/data/learning_practice/uploads`
+- PM2 进程：`learning-practice-web`、`learning-practice-worker`
+- 生产环境变量文件：`/app/learning_practice/.env.production.local`
+- Nginx 配置文件：`/etc/nginx/conf.d/sc_platform.conf`
+
+如果必须在低内存环境临时构建，至少要显式带上下面两个限制项，但这仍然不是默认推荐方式：
+
+```bash
+NEXT_BUILD_CPUS=1
+NEXT_WEBPACK_BUILD_WORKER=false
+```
+
+生产环境必须确保以下变量已经写入 `.env.production.local`：
+
+```bash
+NEXT_PUBLIC_BASE_PATH=/apps/learning-practice
+APP_BASE_URL=https://www.superconsultant.cn/apps/learning-practice
+COOKIE_SECURE=true
+UPLOAD_DIR=/data/learning_practice/uploads
+```
+
+所有大模型和对象存储相关的链接、密钥、模型名、并发参数，也都必须放在环境变量中，不能直接写入代码仓库。
