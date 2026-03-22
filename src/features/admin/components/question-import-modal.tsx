@@ -18,6 +18,10 @@ import {
 const draftPageSizeOptions = [10, 20, 50, 100];
 const sourceRowPageSizeOptions = [10, 20, 50, 100];
 
+function getSafePage(total: number, pageSize: number, page: number) {
+  return Math.min(Math.max(page, 1), Math.max(1, Math.ceil(total / pageSize)));
+}
+
 function getBatchProgressPercent(batch: QuestionImportBatchDetail) {
   if (batch.totalSourceRows > 0) {
     return Math.min(
@@ -88,6 +92,7 @@ export function QuestionImportModal({
   onBatchChange?: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const [batch, setBatch] = useState<QuestionImportBatchDetail | null>(null);
   const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
@@ -97,21 +102,78 @@ export function QuestionImportModal({
   const [isRefreshingBatch, setIsRefreshingBatch] = useState(false);
   const [draftPage, setDraftPage] = useState(1);
   const [draftPageSize, setDraftPageSize] = useState(10);
+  const [draftKeywordInput, setDraftKeywordInput] = useState("");
+  const [draftKeyword, setDraftKeyword] = useState("");
   const [sourceRowPage, setSourceRowPage] = useState(1);
   const [sourceRowPageSize, setSourceRowPageSize] = useState(10);
+  const draftPageRef = useRef(draftPage);
+  const draftPageSizeRef = useRef(draftPageSize);
+  const draftKeywordRef = useRef(draftKeyword);
+  const sourceRowPageRef = useRef(sourceRowPage);
+  const sourceRowPageSizeRef = useRef(sourceRowPageSize);
+  const batchId = batch?.id ?? null;
+  const batchStatus = batch?.status ?? null;
+  const lastDraftSortOrder = batch?.drafts.at(-1)?.sortOrder ?? 0;
+  const lastSourceRowNumber = batch?.sourceRows.at(-1)?.rowNumber ?? 0;
+
+  useEffect(() => {
+    draftPageRef.current = draftPage;
+  }, [draftPage]);
+
+  useEffect(() => {
+    draftPageSizeRef.current = draftPageSize;
+  }, [draftPageSize]);
+
+  useEffect(() => {
+    draftKeywordRef.current = draftKeyword;
+  }, [draftKeyword]);
+
+  useEffect(() => {
+    sourceRowPageRef.current = sourceRowPage;
+  }, [sourceRowPage]);
+
+  useEffect(() => {
+    sourceRowPageSizeRef.current = sourceRowPageSize;
+  }, [sourceRowPageSize]);
 
   const refreshBatch = useCallback(
     async (
       batchId: string,
       options?: {
         resetPagination?: boolean;
+        draftPage?: number;
+        draftPageSize?: number;
+        draftKeyword?: string;
+        sourceRowPage?: number;
+        sourceRowPageSize?: number;
       },
     ) => {
+      const nextDraftPageSize =
+        options?.draftPageSize ?? draftPageSizeRef.current;
+      const nextSourceRowPageSize =
+        options?.sourceRowPageSize ?? sourceRowPageSizeRef.current;
+      const nextDraftPage = options?.resetPagination
+        ? 1
+        : (options?.draftPage ?? draftPageRef.current);
+      const nextSourceRowPage = options?.resetPagination
+        ? 1
+        : (options?.sourceRowPage ?? sourceRowPageRef.current);
+      const nextDraftKeyword =
+        options?.draftKeyword ?? draftKeywordRef.current;
       setIsRefreshingBatch(true);
 
       try {
+        const searchParams = new URLSearchParams({
+          draftPage: String(nextDraftPage),
+          draftPageSize: String(nextDraftPageSize),
+          draftKeyword: nextDraftKeyword,
+          sourceRowPage: String(nextSourceRowPage),
+          sourceRowPageSize: String(nextSourceRowPageSize),
+        });
         const response = await fetch(
-          withAppBasePath(`/api/admin/questions/import/${batchId}`),
+          withAppBasePath(
+            `/api/admin/questions/import/${batchId}?${searchParams.toString()}`,
+          ),
         );
         const payload = (await response
           .json()
@@ -124,17 +186,30 @@ export function QuestionImportModal({
           return;
         }
 
+        const safeDraftPage = getSafePage(
+          payload.draftTotal,
+          nextDraftPageSize,
+          nextDraftPage,
+        );
+        const safeSourceRowPage = getSafePage(
+          payload.sourceRowTotal,
+          nextSourceRowPageSize,
+          nextSourceRowPage,
+        );
+
         setBatch(payload);
+        setErrorMessage("");
         setSelectedDraftIds((current) =>
           current.filter((draftId) =>
             payload.drafts.some((draft) => draft.id === draftId),
           ),
         );
-
-        if (options?.resetPagination) {
-          setDraftPage(1);
-          setSourceRowPage(1);
-        }
+        setDraftPage(safeDraftPage);
+        setDraftPageSize(nextDraftPageSize);
+        setDraftKeyword(nextDraftKeyword);
+        setDraftKeywordInput(nextDraftKeyword);
+        setSourceRowPage(safeSourceRowPage);
+        setSourceRowPageSize(nextSourceRowPageSize);
       } catch {
         setErrorMessage("获取导题批次详情失败");
       } finally {
@@ -144,6 +219,15 @@ export function QuestionImportModal({
     [],
   );
 
+  const closeBatchEventStream = useCallback(() => {
+    if (!eventSourceRef.current) {
+      return;
+    }
+
+    eventSourceRef.current.close();
+    eventSourceRef.current = null;
+  }, []);
+
   useEffect(() => {
     if (!open) {
       setBatch(null);
@@ -152,9 +236,12 @@ export function QuestionImportModal({
       setSuccessMessage("");
       setDraftPage(1);
       setDraftPageSize(10);
+      setDraftKeyword("");
+      setDraftKeywordInput("");
       setSourceRowPage(1);
       setSourceRowPageSize(10);
       setIsRefreshingBatch(false);
+      closeBatchEventStream();
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -162,23 +249,174 @@ export function QuestionImportModal({
     }
 
     if (initialBatchId) {
-      void refreshBatch(initialBatchId, { resetPagination: true });
+      void refreshBatch(initialBatchId, {
+        resetPagination: true,
+        draftKeyword: "",
+      });
     }
-  }, [initialBatchId, open, refreshBatch]);
+  }, [closeBatchEventStream, initialBatchId, open, refreshBatch]);
 
   useEffect(() => {
-    if (!open || !batch || !["PENDING", "PROCESSING"].includes(batch.status)) {
+    if (
+      !open ||
+      !batchId ||
+      !["PENDING", "PROCESSING"].includes(batchStatus ?? "")
+    ) {
+      closeBatchEventStream();
       return;
     }
 
-    const timer = window.setTimeout(() => {
-      void refreshBatch(batch.id);
-    }, 1500);
+    closeBatchEventStream();
+    const searchParams = new URLSearchParams({
+      lastDraftSortOrder: String(lastDraftSortOrder),
+      lastSourceRowNumber: String(lastSourceRowNumber),
+    });
+    const eventSource = new EventSource(
+      withAppBasePath(
+        `/api/admin/questions/import/${batchId}/events?${searchParams.toString()}`,
+      ),
+    );
+    eventSourceRef.current = eventSource;
+
+    const mergeDrafts = (items: QuestionImportBatchDetail["drafts"]) => {
+      setBatch((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const seen = new Set(current.drafts.map((draft) => draft.id));
+        const nextDrafts = [...current.drafts];
+        for (const item of items) {
+          if (!seen.has(item.id)) {
+            nextDrafts.push(item);
+            seen.add(item.id);
+          }
+        }
+
+        nextDrafts.sort((left, right) => left.sortOrder - right.sortOrder);
+        const nextDraftTotal = Math.max(current.draftTotal, nextDrafts.length);
+        setDraftPage((page) =>
+          Math.max(page, Math.ceil(nextDraftTotal / draftPageSize)),
+        );
+        return {
+          ...current,
+          draftTotal: nextDraftTotal,
+          drafts: nextDrafts,
+        };
+      });
+    };
+
+    const mergeSourceRows = (items: QuestionImportBatchDetail["sourceRows"]) => {
+      setBatch((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const seen = new Set(current.sourceRows.map((row) => row.id));
+        const nextSourceRows = [...current.sourceRows];
+        for (const item of items) {
+          if (!seen.has(item.id)) {
+            nextSourceRows.push(item);
+            seen.add(item.id);
+          }
+        }
+
+        nextSourceRows.sort((left, right) => left.rowNumber - right.rowNumber);
+        const nextSourceRowTotal = Math.max(
+          current.sourceRowTotal,
+          nextSourceRows.length,
+        );
+        setSourceRowPage((page) =>
+          Math.max(page, Math.ceil(nextSourceRowTotal / sourceRowPageSize)),
+        );
+        return {
+          ...current,
+          sourceRowTotal: nextSourceRowTotal,
+          sourceRows: nextSourceRows,
+        };
+      });
+    };
+
+    const updateSummary = (payload: Partial<QuestionImportBatchDetail>) => {
+      setBatch((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          ...payload,
+          drafts: current.drafts,
+          sourceRows: current.sourceRows,
+          draftTotal: payload.draftCount ?? current.draftTotal,
+          sourceRowTotal: current.sourceRowTotal,
+        };
+      });
+    };
+
+    eventSource.addEventListener("progress", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as Partial<QuestionImportBatchDetail>;
+      updateSummary(payload);
+    });
+
+    eventSource.addEventListener("drafts_appended", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as QuestionImportBatchDetail["drafts"];
+      mergeDrafts(payload);
+    });
+
+    eventSource.addEventListener("source_rows_appended", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as QuestionImportBatchDetail["sourceRows"];
+      mergeSourceRows(payload);
+    });
+
+    eventSource.addEventListener("completed", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as Partial<QuestionImportBatchDetail>;
+      updateSummary(payload);
+      closeBatchEventStream();
+    });
+
+    eventSource.addEventListener("failed", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as
+        | Partial<QuestionImportBatchDetail>
+        | { message?: string };
+      const message =
+        "message" in payload && typeof payload.message === "string"
+          ? payload.message
+          : "";
+      if (!("id" in payload)) {
+        if (message) {
+          setErrorMessage(message);
+        }
+      } else {
+        updateSummary(payload);
+        setErrorMessage("");
+      }
+      closeBatchEventStream();
+    });
+
+    eventSource.onerror = () => {
+      if (!eventSourceRef.current) {
+        return;
+      }
+
+      setErrorMessage((current) =>
+        current || "导题进度连接已中断，可手动刷新当前批次后继续查看。",
+      );
+    };
 
     return () => {
-      window.clearTimeout(timer);
+      closeBatchEventStream();
     };
-  }, [batch, open, refreshBatch]);
+  }, [
+    batchId,
+    batchStatus,
+    closeBatchEventStream,
+    draftPageSize,
+    lastDraftSortOrder,
+    lastSourceRowNumber,
+    open,
+    sourceRowPageSize,
+  ]);
 
   const allDraftIds = useMemo(
     () => batch?.drafts.map((draft) => draft.id) ?? [],
@@ -186,20 +424,86 @@ export function QuestionImportModal({
   );
   const isAllSelected =
     allDraftIds.length > 0 && selectedDraftIds.length === allDraftIds.length;
-  const pagedDrafts = batch?.drafts.slice(
-    (draftPage - 1) * draftPageSize,
-    draftPage * draftPageSize,
-  );
-  const pagedSourceRows = batch?.sourceRows.slice(
-    (sourceRowPage - 1) * sourceRowPageSize,
-    sourceRowPage * sourceRowPageSize,
-  );
+  const isStreamingBatch =
+    !!batch && ["PENDING", "PROCESSING"].includes(batch.status);
+  const pagedDrafts = isStreamingBatch
+    ? batch?.drafts.slice(
+        (draftPage - 1) * draftPageSize,
+        draftPage * draftPageSize,
+      )
+    : batch?.drafts;
+  const pagedSourceRows = isStreamingBatch
+    ? batch?.sourceRows.slice(
+        (sourceRowPage - 1) * sourceRowPageSize,
+        sourceRowPage * sourceRowPageSize,
+      )
+    : batch?.sourceRows;
   const canShowResultTabs =
     !!batch &&
     (["READY", "CONFIRMED", "FAILED"].includes(batch.status) ||
-      batch.drafts.length > 0 ||
-      batch.sourceRows.length > 0);
+      batch.draftTotal > 0 ||
+      batch.sourceRowTotal > 0);
   const progressPercent = batch ? getBatchProgressPercent(batch) : 0;
+
+  async function handleDraftPaginationChange(page: number, pageSize: number) {
+    setDraftPage(page);
+    setDraftPageSize(pageSize);
+
+    if (!batch || isStreamingBatch) {
+      return;
+    }
+
+    await refreshBatch(batch.id, {
+      draftPage: page,
+      draftPageSize: pageSize,
+    });
+  }
+
+  async function handleSourceRowPaginationChange(
+    page: number,
+    pageSize: number,
+  ) {
+    setSourceRowPage(page);
+    setSourceRowPageSize(pageSize);
+
+    if (!batch || isStreamingBatch) {
+      return;
+    }
+
+    await refreshBatch(batch.id, {
+      sourceRowPage: page,
+      sourceRowPageSize: pageSize,
+    });
+  }
+
+  async function handleDraftSearchSubmit(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!batch || isStreamingBatch) {
+      return;
+    }
+
+    const nextKeyword = draftKeywordInput.trim();
+    await refreshBatch(batch.id, {
+      draftPage: 1,
+      draftKeyword: nextKeyword,
+    });
+  }
+
+  async function handleDraftSearchReset() {
+    setDraftKeywordInput("");
+
+    if (!batch || isStreamingBatch) {
+      setDraftKeyword("");
+      return;
+    }
+
+    await refreshBatch(batch.id, {
+      draftPage: 1,
+      draftKeyword: "",
+    });
+  }
 
   async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -242,7 +546,12 @@ export function QuestionImportModal({
         fileInputRef.current.value = "";
       }
 
-      await refreshBatch(payload.batchId, { resetPagination: true });
+      setDraftKeyword("");
+      setDraftKeywordInput("");
+      await refreshBatch(payload.batchId, {
+        resetPagination: true,
+        draftKeyword: "",
+      });
       setSuccessMessage("文件已上传，系统正在解析题目。");
       onBatchChange?.();
     } catch {
@@ -283,7 +592,7 @@ export function QuestionImportModal({
         return;
       }
 
-      setBatch(payload);
+      await refreshBatch(batch.id);
       setSelectedDraftIds((current) =>
         current.filter((item) => item !== draftId),
       );
@@ -338,7 +647,7 @@ export function QuestionImportModal({
         return;
       }
 
-      setBatch(payload);
+      await refreshBatch(batch.id);
       setSelectedDraftIds([]);
       setDraftPage(1);
       onBatchChange?.();
@@ -350,13 +659,13 @@ export function QuestionImportModal({
   }
 
   async function handleConfirmImport() {
-    if (!batch || batch.drafts.length === 0) {
+    if (!batch || batch.draftCount === 0) {
       return;
     }
 
     if (
       !window.confirm(
-        `确认将当前保留的 ${batch.drafts.length} 道题目导入正式题库吗？`,
+          `确认将当前保留的 ${batch.draftCount} 道题目导入正式题库吗？`,
       )
     ) {
       return;
@@ -384,7 +693,7 @@ export function QuestionImportModal({
         return;
       }
 
-      setBatch(payload);
+      await refreshBatch(batch.id);
       setSelectedDraftIds([]);
       setSuccessMessage(`导入完成，共纳入 ${payload.draftCount} 道题目。`);
       onSuccess();
@@ -397,21 +706,22 @@ export function QuestionImportModal({
 
   return (
     <Modal
+      className="admin-import-modal"
       open={open}
       title="Excel 导题"
       onCancel={onClose}
       footer={null}
       destroyOnHidden
-      width="min(1160px, calc(100vw - 32px))"
+      width="min(1020px, calc(100vw - 24px))"
       styles={{
         body: {
           maxHeight: "74vh",
           overflow: "auto",
-          paddingTop: 12,
+          paddingTop: 8,
         },
       }}
     >
-      <div className="list-grid">
+      <div className="list-grid admin-import-modal-content">
         <form onSubmit={handleUpload} className="admin-modal-upload">
           <div className="page-note">
             只有符合标准模板的文件才按规则解析，其他文件统一交给 AI
@@ -444,7 +754,7 @@ export function QuestionImportModal({
 
         {batch ? (
           <>
-            <section className="admin-summary-grid">
+            <section className="admin-summary-grid is-import-compact">
               <div className="admin-summary-card">
                 <span>文件名</span>
                 <strong title={batch.fileName}>
@@ -524,11 +834,11 @@ export function QuestionImportModal({
 
         {canShowResultTabs ? (
           <Tabs
-            className="admin-modal-tabs"
+            className="admin-modal-tabs is-compact"
             items={[
               {
                 key: "drafts",
-                label: `待确认题目（${batch?.draftCount ?? 0}）`,
+                        label: `待确认题目（${batch?.draftCount ?? 0}）`,
                 children: (
                   <div className="list-grid">
                     {batch?.status === "READY" ? (
@@ -550,13 +860,13 @@ export function QuestionImportModal({
                         >
                           删除已选
                         </Button>
-                        <Button
-                          type="primary"
-                          loading={isMutating}
-                          disabled={batch.drafts.length === 0}
-                          onClick={() => void handleConfirmImport()}
-                        >
-                          确认导入 {batch?.draftCount ?? 0} 道题
+                          <Button
+                            type="primary"
+                            loading={isMutating}
+                            disabled={batch.draftCount === 0}
+                            onClick={() => void handleConfirmImport()}
+                          >
+                            确认导入 {batch?.draftCount ?? 0} 道题
                         </Button>
                       </div>
                     ) : batch?.status === "CONFIRMED" ? (
@@ -576,7 +886,47 @@ export function QuestionImportModal({
                       </div>
                     ) : null}
 
-                    {batch?.drafts.length ? (
+                    <form
+                      onSubmit={(event) => void handleDraftSearchSubmit(event)}
+                      className="admin-import-search-form"
+                    >
+                      <input
+                        className="admin-import-search-input"
+                        type="search"
+                        placeholder="搜索题干、来源说明或来源行"
+                        value={draftKeywordInput}
+                        onChange={(event) =>
+                          setDraftKeywordInput(event.target.value)
+                        }
+                        disabled={isStreamingBatch || isRefreshingBatch}
+                      />
+                      <Button
+                        htmlType="submit"
+                        size="small"
+                        disabled={isStreamingBatch || isRefreshingBatch}
+                      >
+                        搜索
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => void handleDraftSearchReset()}
+                        disabled={
+                          isStreamingBatch ||
+                          isRefreshingBatch ||
+                          (!draftKeyword && !draftKeywordInput)
+                        }
+                      >
+                        清空
+                      </Button>
+                      {draftKeyword ? (
+                        <span className="page-note">
+                          当前命中 {batch?.draftTotal ?? 0} 条，批次总草稿{" "}
+                          {batch?.draftCount ?? 0} 条
+                        </span>
+                      ) : null}
+                    </form>
+
+                    {batch?.draftTotal ? (
                       <>
                         <div className="admin-table-wrap">
                           <table className="admin-table is-import-detail-table">
@@ -669,13 +1019,12 @@ export function QuestionImportModal({
                           size="small"
                           current={draftPage}
                           pageSize={draftPageSize}
-                          total={batch.drafts.length}
+                          total={batch.draftTotal}
                           pageSizeOptions={draftPageSizeOptions.map(String)}
                           showSizeChanger
-                          onChange={(page, pageSize) => {
-                            setDraftPage(page);
-                            setDraftPageSize(pageSize);
-                          }}
+                          onChange={(page, pageSize) =>
+                            void handleDraftPaginationChange(page, pageSize)
+                          }
                         />
                       </>
                     ) : (
@@ -688,8 +1037,8 @@ export function QuestionImportModal({
               },
               {
                 key: "rows",
-                label: `来源行判定（${batch?.sourceRows.length ?? 0}）`,
-                children: batch?.sourceRows.length ? (
+                label: `来源行判定（${batch?.sourceRowTotal ?? 0}）`,
+                children: batch?.sourceRowTotal ? (
                   <div className="list-grid">
                     <div className="admin-table-wrap">
                       <table className="admin-table is-import-detail-table">
@@ -728,13 +1077,12 @@ export function QuestionImportModal({
                       size="small"
                       current={sourceRowPage}
                       pageSize={sourceRowPageSize}
-                      total={batch.sourceRows.length}
+                      total={batch.sourceRowTotal}
                       pageSizeOptions={sourceRowPageSizeOptions.map(String)}
                       showSizeChanger
-                      onChange={(page, pageSize) => {
-                        setSourceRowPage(page);
-                        setSourceRowPageSize(pageSize);
-                      }}
+                      onChange={(page, pageSize) =>
+                        void handleSourceRowPaginationChange(page, pageSize)
+                      }
                     />
                   </div>
                 ) : (

@@ -4,6 +4,7 @@ import { PracticeMode, PracticeSourceType } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { useMobileBusy } from "@/features/mobile/components/mobile-busy-provider";
 import { withAppBasePath } from "@/shared/utils/app-path";
 
 const options = [
@@ -24,6 +25,7 @@ export function StartPracticeForm({
   buttonText = "开始练习",
 }: StartPracticeFormProps) {
   const router = useRouter();
+  const { startBusy } = useMobileBusy();
   const availableOptions = useMemo(
     () =>
       sourceType === PracticeSourceType.WRONG_BOOK
@@ -59,18 +61,26 @@ export function StartPracticeForm({
 
     setFeedbackMessage("");
     setIsSubmitting(true);
+    const busyHandle = startBusy({
+      title: "正在创建练习会话",
+      description: "系统正在准备题目和练习模式，完成后会自动进入答题页面。",
+      keepUntilPathChange: true,
+    });
 
     try {
-      const response = await fetch(withAppBasePath(`/api/mobile/banks/${bankId}/sessions`), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        withAppBasePath(`/api/mobile/banks/${bankId}/sessions`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            practiceMode: mode,
+            sourceType,
+          }),
         },
-        body: JSON.stringify({
-          practiceMode: mode,
-          sourceType,
-        }),
-      });
+      );
 
       const payload = (await response.json().catch(() => ({}))) as {
         message?: string;
@@ -78,12 +88,14 @@ export function StartPracticeForm({
       };
 
       if (!response.ok || !payload.sessionId) {
-        setFeedbackMessage(payload.message ?? "创建练习失败");
+        busyHandle.clear();
+        setFeedbackMessage(payload.message ?? "创建练习失败。");
         return;
       }
 
       router.push(`/m/practice/${payload.sessionId}`);
     } catch {
+      busyHandle.clear();
       setFeedbackMessage("创建练习失败，请稍后重试。");
     } finally {
       setIsSubmitting(false);
@@ -136,7 +148,11 @@ export function StartPracticeForm({
         disabled={!isInteractive || isSubmitting}
         aria-busy={!isInteractive || isSubmitting}
       >
-        {!isInteractive ? "页面准备中..." : isSubmitting ? "创建中..." : buttonText}
+        {!isInteractive
+          ? "页面准备中..."
+          : isSubmitting
+            ? "创建中..."
+            : buttonText}
       </button>
     </div>
   );

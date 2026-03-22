@@ -14,7 +14,7 @@ const notoSans = Noto_Sans_SC({
 
 export const metadata: Metadata = {
   title: APP_NAME,
-  description: "法律刷题与后台管理系统",
+  description: "刷题练习与后台管理工具",
 };
 
 export default function RootLayout({

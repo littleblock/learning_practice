@@ -3,7 +3,13 @@
 import { Button, Tabs } from "antd";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 
 import { QuestionFilters } from "@/features/admin/components/admin-filters";
 import { AdminPagination } from "@/features/admin/components/admin-pagination";
@@ -15,6 +21,7 @@ import { withAppBasePath } from "@/shared/utils/app-path";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
 import {
   formatDateTime,
+  formatDurationBetween,
   getBatchStatusLabel,
   getImportTemplateTypeLabel,
   joinOptions,
@@ -31,6 +38,31 @@ const QuestionImportModal = dynamic(() =>
     (module) => module.QuestionImportModal,
   ),
 );
+
+const questionColumnDefinitions = [
+  { key: "sortOrder", label: "序号", width: 78, minWidth: 64 },
+  { key: "type", label: "题型", width: 96, minWidth: 84 },
+  { key: "stem", label: "题干", width: 360, minWidth: 260 },
+  { key: "options", label: "选项", width: 320, minWidth: 240 },
+  { key: "correctAnswers", label: "正确答案", width: 128, minWidth: 108 },
+  { key: "analysis", label: "解析", width: 210, minWidth: 160 },
+  { key: "lawSource", label: "答案来源", width: 240, minWidth: 180 },
+  { key: "createdBy", label: "创建人", width: 108, minWidth: 92 },
+  { key: "createdAt", label: "创建时间", width: 188, minWidth: 164 },
+  { key: "updatedBy", label: "更新人", width: 108, minWidth: 92 },
+  { key: "updatedAt", label: "更新时间", width: 188, minWidth: 164 },
+  { key: "actions", label: "操作", width: 128, minWidth: 116 },
+] as const;
+
+type QuestionColumnKey = (typeof questionColumnDefinitions)[number]["key"];
+
+const defaultQuestionColumnWidths = Object.fromEntries(
+  questionColumnDefinitions.map((column) => [column.key, column.width]),
+) as Record<QuestionColumnKey, number>;
+
+const questionColumnMinWidths = Object.fromEntries(
+  questionColumnDefinitions.map((column) => [column.key, column.minWidth]),
+) as Record<QuestionColumnKey, number>;
 
 function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
   switch (status) {
@@ -63,31 +95,52 @@ function getBatchProgressPercent(batch: QuestionImportBatchSummary) {
   return 0;
 }
 
-function getBatchProgressText(batch: QuestionImportBatchSummary) {
-  const rowProgress =
-    batch.totalSourceRows > 0
-      ? `${batch.processedSourceRows}/${batch.totalSourceRows} 行`
-      : batch.status === "READY" || batch.status === "CONFIRMED"
-        ? "已完成"
-        : batch.status === "FAILED"
-          ? "已失败"
-          : "等待开始";
-  const chunkProgress =
-    batch.totalChunks > 0
-      ? `${batch.processedChunks}/${batch.totalChunks} 块`
-      : batch.status === "READY" || batch.status === "CONFIRMED"
-        ? "分块完成"
-        : batch.status === "FAILED"
-          ? "分块中断"
-          : "未生成分块";
-  const concurrencyText =
-    batch.currentConcurrency > 0
-      ? `当前并发 ${batch.currentConcurrency}`
-      : null;
+function getBatchProgressSummary(batch: QuestionImportBatchSummary) {
+  if (batch.totalSourceRows > 0) {
+    return `${batch.processedSourceRows}/${batch.totalSourceRows} 行`;
+  }
 
-  return [rowProgress, chunkProgress, concurrencyText]
-    .filter(Boolean)
-    .join(" · ");
+  if (batch.status === "READY" || batch.status === "CONFIRMED") {
+    return "已完成";
+  }
+
+  if (batch.status === "FAILED") {
+    return "已失败";
+  }
+
+  return "等待开始";
+}
+
+function getBatchProgressDetail(batch: QuestionImportBatchSummary) {
+  if (batch.totalChunks > 0) {
+    return `已完成 ${batch.processedChunks}/${batch.totalChunks} 个分块`;
+  }
+
+  if (batch.status === "READY" || batch.status === "CONFIRMED") {
+    return "分块解析已完成";
+  }
+
+  if (batch.status === "FAILED") {
+    return "分块解析中断";
+  }
+
+  return "尚未生成分块";
+}
+
+function getBatchParseDuration(batch: QuestionImportBatchSummary) {
+  if (batch.parsedAt) {
+    return formatDurationBetween(batch.createdAt, batch.parsedAt);
+  }
+
+  if (batch.status === "PROCESSING") {
+    return "进行中";
+  }
+
+  if (batch.status === "PENDING") {
+    return "等待解析";
+  }
+
+  return "-";
 }
 
 export function QuestionManager({
@@ -135,8 +188,60 @@ export function QuestionManager({
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [questionColumnWidths, setQuestionColumnWidths] = useState(
+    defaultQuestionColumnWidths,
+  );
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [isSwitchingTab, startTabTransition] = useTransition();
+  const [resizingColumn, setResizingColumn] =
+    useState<QuestionColumnKey | null>(null);
+  const resizeStateRef = useRef<{
+    key: QuestionColumnKey;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!resizingColumn) {
+      return;
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      const state = resizeStateRef.current;
+      if (!state) {
+        return;
+      }
+
+      const nextWidth = Math.max(
+        questionColumnMinWidths[state.key],
+        state.startWidth + event.clientX - state.startX,
+      );
+
+      setQuestionColumnWidths((current) => {
+        if (current[state.key] === nextWidth) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [state.key]: nextWidth,
+        };
+      });
+    }
+
+    function stopResize() {
+      resizeStateRef.current = null;
+      setResizingColumn(null);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", stopResize);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", stopResize);
+    };
+  }, [resizingColumn]);
 
   function refreshCurrentPage() {
     startRefreshTransition(() => {
@@ -145,7 +250,9 @@ export function QuestionManager({
   }
 
   async function deleteQuestion(questionId: string) {
-    if (!window.confirm("删除题目后将同步刷新匹配结果，确认删除吗？")) {
+    if (
+      !window.confirm("删除题目后将同步刷新匹配结果，确认删除吗？")
+    ) {
       return;
     }
 
@@ -153,9 +260,12 @@ export function QuestionManager({
     setDeleteError(null);
 
     try {
-      const response = await fetch(withAppBasePath(`/api/admin/questions/${questionId}`), {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        withAppBasePath(`/api/admin/questions/${questionId}`),
+        {
+          method: "DELETE",
+        },
+      );
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as {
@@ -202,35 +312,42 @@ export function QuestionManager({
     }
 
     startTabTransition(() => {
-      router.push(
-        `/admin/banks/${bankId}/questions?${searchParams.toString()}`,
-      );
+      router.push(`/admin/banks/${bankId}/questions?${searchParams.toString()}`);
     });
+  }
+
+  function startColumnResize(
+    key: QuestionColumnKey,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStateRef.current = {
+      key,
+      startX: event.clientX,
+      startWidth: questionColumnWidths[key],
+    };
+    setResizingColumn(key);
   }
 
   return (
     <>
       <section className="admin-panel admin-tabs-panel">
         <Tabs
-          className="admin-content-tabs"
+          className="admin-content-tabs is-compact"
           activeKey={activeTab}
           onChange={handleTabChange}
           destroyOnHidden
           items={[
             {
               key: "questions",
-              label: `题目列表（${questionTotal}）`,
+              label: `题目列表 (${questionTotal})`,
               children: (
                 <div className="admin-tab-content">
-                  <div
-                    className="admin-section-header"
-                    style={{ marginBottom: 16 }}
-                  >
-                    <div>
-                      <h2 style={{ margin: 0, fontSize: 20 }}>题目列表</h2>
-                      <p className="page-note" style={{ marginTop: 8 }}>
-                        支持分页查看、单题维护和导入后的结果核验。
-                      </p>
+                  <div className="admin-section-header is-compact">
+                    <div className="admin-page-header-copy is-compact">
+                      <h2>题目列表</h2>
+                      <p>支持分页查看、单题维护和导入后的结果校验。</p>
                     </div>
                     <div className="inline-actions">
                       <Button
@@ -262,11 +379,11 @@ export function QuestionManager({
                     </p>
                     {isRefreshing ? (
                       <span className="admin-inline-status">
-                        正在刷新当前列表…
+                        正在刷新当前列表
                       </span>
                     ) : null}
                     {isSwitchingTab ? (
-                      <span className="admin-inline-status">正在切换标签…</span>
+                      <span className="admin-inline-status">正在切换页签</span>
                     ) : null}
                   </div>
 
@@ -276,27 +393,44 @@ export function QuestionManager({
 
                   {questions.length === 0 ? (
                     <div className="admin-empty-state">
-                      当前筛选结果为空，可以调整筛选条件，或通过新增题目、Excel
+                      当前筛选结果为空，可以调整筛选条件，或者通过新增题目、Excel
                       导入补充内容。
                     </div>
                   ) : (
                     <>
                       <div className="admin-table-wrap">
-                        <table className="admin-table is-question-table">
+                        <table className="admin-table is-question-table is-resizable">
+                          <colgroup>
+                            {questionColumnDefinitions.map((column) => (
+                              <col
+                                key={column.key}
+                                style={{
+                                  width: `${questionColumnWidths[column.key]}px`,
+                                }}
+                              />
+                            ))}
+                          </colgroup>
                           <thead>
                             <tr>
-                              <th style={{ width: 88 }}>序号</th>
-                              <th style={{ width: 108 }}>题目类型</th>
-                              <th style={{ width: "24%" }}>题干</th>
-                              <th style={{ width: "24%" }}>选项</th>
-                              <th style={{ width: 132 }}>正确答案</th>
-                              <th style={{ width: "18%" }}>解析</th>
-                              <th style={{ width: 180 }}>答案来源</th>
-                              <th style={{ width: 110 }}>创建人</th>
-                              <th style={{ width: 168 }}>创建时间</th>
-                              <th style={{ width: 110 }}>更新人</th>
-                              <th style={{ width: 168 }}>更新时间</th>
-                              <th style={{ width: 180 }}>操作</th>
+                              {questionColumnDefinitions.map((column) => (
+                                <th key={column.key}>
+                                  <div className="admin-table-head-content">
+                                    <span>{column.label}</span>
+                                    <button
+                                      type="button"
+                                      className={
+                                        resizingColumn === column.key
+                                          ? "admin-column-resizer is-active"
+                                          : "admin-column-resizer"
+                                      }
+                                      aria-label={`调整${column.label}列宽`}
+                                      onMouseDown={(event) =>
+                                        startColumnResize(column.key, event)
+                                      }
+                                    />
+                                  </div>
+                                </th>
+                              ))}
                             </tr>
                           </thead>
                           <tbody>
@@ -305,20 +439,20 @@ export function QuestionManager({
                                 <td>{question.sortOrder}</td>
                                 <td>{getQuestionTypeLabel(question.type)}</td>
                                 <td title={question.stem}>
-                                  {truncateText(question.stem, 80)}
+                                  {truncateText(question.stem, 120)}
                                 </td>
                                 <td title={joinOptions(question.options)}>
                                   {truncateText(
                                     joinOptions(question.options),
-                                    120,
+                                    180,
                                   )}
                                 </td>
                                 <td>{question.correctAnswers.join(", ")}</td>
                                 <td title={question.analysis || "-"}>
-                                  {truncateText(question.analysis, 60)}
+                                  {truncateText(question.analysis, 120)}
                                 </td>
                                 <td title={question.lawSource || "-"}>
-                                  {truncateText(question.lawSource, 40)}
+                                  {truncateText(question.lawSource, 90)}
                                 </td>
                                 <td>{question.createdByName || "-"}</td>
                                 <td>{formatDateTime(question.createdAt)}</td>
@@ -335,7 +469,7 @@ export function QuestionManager({
                                       编辑
                                     </button>
                                     <span className="admin-table-action-divider">
-                                      |
+                                      /
                                     </span>
                                     <button
                                       type="button"
@@ -374,23 +508,20 @@ export function QuestionManager({
             },
             {
               key: "imports",
-              label: `导入记录（${importBatchTotal}）`,
+              label: `导入记录 (${importBatchTotal})`,
               children: (
                 <div className="admin-tab-content">
-                  <div
-                    className="admin-section-header"
-                    style={{ marginBottom: 16 }}
-                  >
-                    <div>
-                      <h2 style={{ margin: 0, fontSize: 20 }}>导入记录</h2>
-                      <p className="page-note" style={{ marginTop: 8 }}>
-                        只有标准模板按规则解析，其他文件全部交给 AI
-                        识别。每一行都会记录是否成功匹配为题目。
+                  <div className="admin-section-header is-compact">
+                    <div className="admin-page-header-copy is-compact">
+                      <h2>导入记录</h2>
+                      <p>
+                        标准模板按规则解析，其他文件由 AI
+                        识别，每一行都会记录解析结果。
                       </p>
                     </div>
                     <div className="inline-actions">
                       <a href={withAppBasePath("/api/admin/questions/import/template")}>
-                        下载标准模板
+                        下载模板
                       </a>
                       <Button
                         onClick={refreshCurrentPage}
@@ -411,23 +542,21 @@ export function QuestionManager({
 
                   <div className="admin-inline-status-row">
                     <p className="page-note" style={{ margin: 0 }}>
-                      当前共有 {importBatchTotal}{" "}
-                      条导入记录，可查看解析进度与失败原因。
+                      当前共有 {importBatchTotal} 条导入记录，可查看解析进度与失败原因。
                     </p>
                     {isRefreshing ? (
                       <span className="admin-inline-status">
-                        正在刷新导入记录…
+                        正在刷新导入记录
                       </span>
                     ) : null}
                     {isSwitchingTab ? (
-                      <span className="admin-inline-status">正在切换标签…</span>
+                      <span className="admin-inline-status">正在切换页签</span>
                     ) : null}
                   </div>
 
                   {importBatches.length === 0 ? (
                     <div className="admin-empty-state">
-                      当前题库还没有导入记录，点击“Excel
-                      导入”即可上传文件并查看解析结果。
+                      当前题库还没有导入记录，点击“Excel 导入”即可上传文件并查看解析结果。
                     </div>
                   ) : (
                     <>
@@ -435,14 +564,14 @@ export function QuestionManager({
                         <table className="admin-table is-import-table">
                           <thead>
                             <tr>
-                              <th style={{ width: "23%" }}>文件名</th>
+                              <th style={{ width: "28%" }}>文件名</th>
                               <th style={{ width: 120 }}>解析方式</th>
                               <th style={{ width: 112 }}>状态</th>
-                              <th style={{ width: "24%" }}>进度</th>
+                              <th style={{ width: 220 }}>进度</th>
                               <th style={{ width: 96 }}>草稿数</th>
-                              <th style={{ width: 150 }}>工作表</th>
-                              <th style={{ width: 168 }}>上传时间</th>
-                              <th style={{ width: 168 }}>解析时间</th>
+                              <th style={{ width: 168 }}>工作表</th>
+                              <th style={{ width: 188 }}>上传时间</th>
+                              <th style={{ width: 148 }}>解析耗时</th>
                               <th style={{ width: "18%" }}>错误信息</th>
                               <th style={{ width: 140 }}>操作</th>
                             </tr>
@@ -455,7 +584,7 @@ export function QuestionManager({
                               return (
                                 <tr key={batch.id}>
                                   <td title={batch.fileName}>
-                                    {truncateText(batch.fileName, 48)}
+                                    {truncateText(batch.fileName, 72)}
                                   </td>
                                   <td>
                                     {getImportTemplateTypeLabel(
@@ -464,7 +593,7 @@ export function QuestionManager({
                                   </td>
                                   <td>{getBatchStatusLabel(batch.status)}</td>
                                   <td>
-                                    <div className="admin-progress-cell">
+                                    <div className="admin-progress-cell is-compact">
                                       <div className="progress-track admin-progress-track">
                                         <div
                                           className="progress-fill"
@@ -473,22 +602,30 @@ export function QuestionManager({
                                           }}
                                         />
                                       </div>
-                                      <div className="admin-progress-meta">
-                                        <span>{progressPercent}%</span>
+                                      <div className="admin-progress-copy">
+                                        <strong>
+                                          {progressPercent}% ·{" "}
+                                          {getBatchProgressSummary(batch)}
+                                        </strong>
                                         <span>
-                                          {getBatchProgressText(batch)}
+                                          {getBatchProgressDetail(batch)}
                                         </span>
+                                        {batch.currentConcurrency > 0 ? (
+                                          <span>
+                                            当前并发 {batch.currentConcurrency}
+                                          </span>
+                                        ) : null}
                                       </div>
                                     </div>
                                   </td>
                                   <td>{batch.draftCount}</td>
                                   <td title={batch.sourceSheetName || "-"}>
-                                    {truncateText(batch.sourceSheetName, 24)}
+                                    {truncateText(batch.sourceSheetName, 40)}
                                   </td>
                                   <td>{formatDateTime(batch.createdAt)}</td>
-                                  <td>{formatDateTime(batch.parsedAt)}</td>
+                                  <td>{getBatchParseDuration(batch)}</td>
                                   <td title={batch.lastError || "-"}>
-                                    {truncateText(batch.lastError, 48)}
+                                    {truncateText(batch.lastError, 64)}
                                   </td>
                                   <td className="admin-table-actions-cell">
                                     <div className="admin-table-action-links">

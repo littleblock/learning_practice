@@ -1,9 +1,44 @@
+function formatDuration(valueMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h${minutes}min${seconds}s`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}min${seconds}s`;
+  }
+
+  return `${seconds}s`;
+}
+
 export function formatDateTime(value: string | null) {
   if (!value) {
     return "-";
   }
 
   return new Date(value).toLocaleString("zh-CN");
+}
+
+export function formatDurationBetween(
+  startValue: string | null,
+  endValue: string | null,
+) {
+  if (!startValue) {
+    return "-";
+  }
+
+  const startTime = new Date(startValue).getTime();
+  const endTime = endValue ? new Date(endValue).getTime() : Date.now();
+
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+    return "-";
+  }
+
+  return formatDuration(Math.max(0, endTime - startTime));
 }
 
 export function joinOptions(

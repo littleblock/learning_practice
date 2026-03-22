@@ -1,4 +1,21 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+
+function ensureUtf8Console() {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  try {
+    execSync("chcp 65001 >NUL", {
+      stdio: "ignore",
+      shell: "cmd.exe",
+    });
+  } catch {
+    // 本地终端不支持切换编码时，继续沿用当前控制台配置。
+  }
+}
+
+ensureUtf8Console();
 
 const packageManagerExecPath = process.env.npm_execpath;
 

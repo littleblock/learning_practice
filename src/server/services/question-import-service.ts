@@ -19,6 +19,7 @@ import type {
   QuestionImportSourceRowItem,
   QuestionImportDraftItem,
   QuestionImportBatchSummary,
+  QuestionImportSchemaSummary,
 } from "@/shared/types/domain";
 import { EXCEL_MAX_SIZE_BYTES } from "@/shared/constants/app";
 import {
@@ -27,19 +28,13 @@ import {
 } from "@/shared/utils/file";
 import { resolvePagination } from "@/shared/utils/pagination";
 import { prisma } from "@/server/db/client";
-import { getServerEnv } from "@/server/env";
 import { logger } from "@/server/logger";
 import { enqueueJob } from "@/server/repositories/job-repository";
-import {
-  AiSplitConcurrencyController,
-  mapWithAdaptiveConcurrency,
-} from "@/server/services/ai-split-concurrency";
 import { assertBankExists } from "@/server/services/bank-service";
 import {
-  isAiRateLimitError,
-  splitQuestionsWithAi,
-  type AiSourceRowInput,
-} from "@/server/services/question-import-ai-service";
+  detectStructuredQuestionImportSchema,
+  parseRowsWithStructuredSchema,
+} from "@/server/services/question-import-schema-service";
 import { refreshQuestionEmbeddings } from "@/server/services/matching-service";
 import {
   looksLikeLawSource,
@@ -67,6 +62,8 @@ interface FailedSourceRow {
 interface ParsedWorkbookResult {
   sourceSheetName: string;
   templateType: QuestionImportTemplateType;
+  schemaMode: string | null;
+  schemaSummary: QuestionImportSchemaSummary | null;
   drafts: QuestionImportDraftInput[];
   sourceRows: QuestionImportSourceRowItem[];
   persistedDuringParsing?: boolean;
@@ -75,13 +72,12 @@ interface ParsedWorkbookResult {
 const questionCreateChunkSize = 200;
 const standardTemplateChunkCount = 1;
 
-interface ParsedAiChunkResult {
-  drafts: QuestionImportDraftInput[];
-  failedRows: FailedSourceRow[];
-}
-
-interface PersistableAiChunkResult extends ParsedAiChunkResult {
-  rows: SheetRow[];
+interface QuestionImportBatchDetailOptions {
+  draftPage?: number;
+  draftPageSize?: number;
+  draftKeyword?: string;
+  sourceRowPage?: number;
+  sourceRowPageSize?: number;
 }
 
 async function initializeBatchProgress(
@@ -149,6 +145,18 @@ const standardTemplateHeaderKeys = standardTemplateColumns.map((column) =>
   normalizeHeaderKey(column.label),
 );
 
+const standardTemplateSchemaSummary: QuestionImportSchemaSummary = {
+  headerRowCount: 1,
+  questionTypeColumn: 0,
+  stemColumn: 1,
+  optionColumns: [2, 3, 4, 5, 6, 7],
+  answerColumn: 8,
+  analysisColumn: 9,
+  lawSourceColumn: 10,
+  ignoredColumns: [],
+  answerEncoding: "NUMERIC_INDEX",
+};
+
 function isRowEmpty(values: string[]) {
   return values.every((value) => value.trim().length === 0);
 }
@@ -198,6 +206,56 @@ function parseNumberArray(value: Prisma.JsonValue | null) {
   return value
     .map((item) => Number(item))
     .filter((item) => Number.isInteger(item) && item > 0);
+}
+
+function parseSchemaSummary(
+  value: Prisma.JsonValue | null,
+): QuestionImportSchemaSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const summary = value as Record<string, unknown>;
+
+  return {
+    headerRowCount: Number(summary.headerRowCount ?? 0),
+    questionTypeColumn:
+      summary.questionTypeColumn === null
+        ? null
+        : Number(summary.questionTypeColumn ?? 0),
+    stemColumn:
+      summary.stemColumn === null ? null : Number(summary.stemColumn ?? 0),
+    optionColumns: Array.isArray(summary.optionColumns)
+      ? summary.optionColumns.map((item) => Number(item))
+      : [],
+    answerColumn:
+      summary.answerColumn === null ? null : Number(summary.answerColumn ?? 0),
+    analysisColumn:
+      summary.analysisColumn === null
+        ? null
+        : Number(summary.analysisColumn ?? 0),
+    lawSourceColumn:
+      summary.lawSourceColumn === null
+        ? null
+        : Number(summary.lawSourceColumn ?? 0),
+    ignoredColumns: Array.isArray(summary.ignoredColumns)
+      ? summary.ignoredColumns.map((item) => Number(item))
+      : [],
+    answerEncoding:
+      typeof summary.answerEncoding === "string"
+        ? summary.answerEncoding
+        : null,
+  };
+}
+
+function serializeSchemaSummary(
+  value: QuestionImportSchemaSummary | null,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  if (!value) {
+    return Prisma.JsonNull;
+  }
+
+  return value as unknown as Prisma.InputJsonValue;
 }
 
 function mapDraftRecord(item: {
@@ -254,6 +312,8 @@ function mapBatchSummary(item: {
   sourceSheetName: string | null;
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
+  schemaMode: string | null;
+  schemaSummary: Prisma.JsonValue | null;
   draftCount: number;
   totalSourceRows: number;
   processedSourceRows: number;
@@ -271,6 +331,8 @@ function mapBatchSummary(item: {
     sourceSheetName: item.sourceSheetName,
     templateType: item.templateType,
     status: item.status,
+    schemaMode: item.schemaMode,
+    schemaSummary: parseSchemaSummary(item.schemaSummary),
     draftCount: item.draftCount,
     totalSourceRows: item.totalSourceRows,
     processedSourceRows: item.processedSourceRows,
@@ -286,51 +348,139 @@ function mapBatchSummary(item: {
 
 async function buildQuestionImportBatchDetail(
   batchId: string,
+  options: QuestionImportBatchDetailOptions = {},
 ): Promise<QuestionImportBatchDetail> {
   const batch = await prisma.questionImportBatch.findUnique({
     where: { id: batchId },
-    include: {
-      drafts: {
-        where: {
-          isDeleted: false,
-        },
-        orderBy: {
-          sortOrder: "asc",
-        },
-        select: {
-          id: true,
-          type: true,
-          stem: true,
-          options: true,
-          correctAnswers: true,
-          analysis: true,
-          lawSource: true,
-          sortOrder: true,
-          sourceLabel: true,
-          sourceContent: true,
-          sourceRowNumbers: true,
-          isDeleted: true,
-        },
-      },
-      sourceRows: {
-        orderBy: {
-          rowNumber: "asc",
-        },
-        select: {
-          id: true,
-          rowNumber: true,
-          status: true,
-          content: true,
-          reason: true,
-          matchedSortOrders: true,
-        },
-      },
+    select: {
+      id: true,
+      bankId: true,
+      fileName: true,
+      sourceSheetName: true,
+      templateType: true,
+      status: true,
+      schemaMode: true,
+      schemaSummary: true,
+      draftCount: true,
+      totalSourceRows: true,
+      processedSourceRows: true,
+      totalChunks: true,
+      processedChunks: true,
+      currentConcurrency: true,
+      lastError: true,
+      createdAt: true,
+      parsedAt: true,
+      confirmedAt: true,
     },
   });
 
   if (!batch) {
     throw new Error("导题批次不存在");
   }
+
+  const draftKeyword = options.draftKeyword?.trim() ?? "";
+  const draftWhere: Prisma.QuestionImportDraftWhereInput = {
+    batchId,
+    isDeleted: false,
+    ...(draftKeyword
+      ? {
+          OR: [
+            {
+              stem: {
+                contains: draftKeyword,
+                mode: "insensitive",
+              },
+            },
+            {
+              lawSource: {
+                contains: draftKeyword,
+                mode: "insensitive",
+              },
+            },
+            {
+              sourceContent: {
+                contains: draftKeyword,
+                mode: "insensitive",
+              },
+            },
+            {
+              sourceLabel: {
+                contains: draftKeyword,
+                mode: "insensitive",
+              },
+            },
+          ],
+        }
+      : {}),
+  };
+  const [draftTotal, sourceRowTotal] = await Promise.all([
+    prisma.questionImportDraft.count({
+      where: draftWhere,
+    }),
+    prisma.questionImportSourceRow.count({
+      where: { batchId },
+    }),
+  ]);
+  const {
+    skip: draftSkip,
+    take: draftTake,
+  } = resolvePagination(
+    options.draftPage ?? 1,
+    options.draftPageSize ?? 10,
+    draftTotal,
+  );
+  const {
+    skip: sourceRowSkip,
+    take: sourceRowTake,
+  } = resolvePagination(
+    options.sourceRowPage ?? 1,
+    options.sourceRowPageSize ?? 10,
+    sourceRowTotal,
+  );
+  const [drafts, sourceRows] = await Promise.all([
+    draftTotal > 0
+      ? prisma.questionImportDraft.findMany({
+          where: draftWhere,
+          orderBy: {
+            sortOrder: "asc",
+          },
+          skip: draftSkip,
+          take: draftTake,
+          select: {
+            id: true,
+            type: true,
+            stem: true,
+            options: true,
+            correctAnswers: true,
+            analysis: true,
+            lawSource: true,
+            sortOrder: true,
+            sourceLabel: true,
+            sourceContent: true,
+            sourceRowNumbers: true,
+            isDeleted: true,
+          },
+        })
+      : Promise.resolve([]),
+    sourceRowTotal > 0
+      ? prisma.questionImportSourceRow.findMany({
+          where: { batchId },
+          orderBy: {
+            rowNumber: "asc",
+          },
+          skip: sourceRowSkip,
+          take: sourceRowTake,
+          select: {
+            id: true,
+            rowNumber: true,
+            status: true,
+            content: true,
+            reason: true,
+            matchedSortOrders: true,
+          },
+        })
+      : Promise.resolve([]),
+  ]);
 
   return {
     id: batch.id,
@@ -339,7 +489,10 @@ async function buildQuestionImportBatchDetail(
     sourceSheetName: batch.sourceSheetName,
     templateType: batch.templateType,
     status: batch.status,
+    schemaMode: batch.schemaMode,
+    schemaSummary: parseSchemaSummary(batch.schemaSummary),
     draftCount: batch.draftCount,
+    draftTotal,
     totalSourceRows: batch.totalSourceRows,
     processedSourceRows: batch.processedSourceRows,
     totalChunks: batch.totalChunks,
@@ -349,8 +502,9 @@ async function buildQuestionImportBatchDetail(
     createdAt: batch.createdAt.toISOString(),
     parsedAt: batch.parsedAt?.toISOString() ?? null,
     confirmedAt: batch.confirmedAt?.toISOString() ?? null,
-    drafts: batch.drafts.map(mapDraftRecord),
-    sourceRows: batch.sourceRows.map(mapSourceRowRecord),
+    drafts: drafts.map(mapDraftRecord),
+    sourceRowTotal,
+    sourceRows: sourceRows.map(mapSourceRowRecord),
   };
 }
 
@@ -563,84 +717,6 @@ function chunkArray<T>(items: T[], size: number) {
   return chunks;
 }
 
-function tryParseSingleRowFallback(
-  row: SheetRow,
-  sortOrder: number,
-): QuestionImportDraftInput | null {
-  const cells = row.values.map((value) => value.trim()).filter(Boolean);
-  if (cells.length < 5) {
-    return null;
-  }
-
-  let questionType: ReturnType<typeof normalizeImportQuestionTypeValue>;
-  try {
-    questionType = normalizeImportQuestionTypeValue(cells[0]);
-  } catch {
-    return null;
-  }
-
-  let stemIndex = 1;
-  while (stemIndex < cells.length && cells[stemIndex].length < 5) {
-    stemIndex += 1;
-  }
-
-  if (stemIndex >= cells.length - 3) {
-    return null;
-  }
-
-  const stem = cells[stemIndex];
-  const tailCells = cells.slice(stemIndex + 1);
-  let lawSource: string | undefined;
-  let candidateCells = tailCells;
-
-  const lastCell = candidateCells.at(-1);
-  if (lastCell && looksLikeLawSource(lastCell)) {
-    lawSource = lastCell;
-    candidateCells = candidateCells.slice(0, -1);
-  }
-
-  if (candidateCells.length < 3 || candidateCells.length > 7) {
-    return null;
-  }
-
-  const correctAnswer = candidateCells.at(-1);
-  if (!correctAnswer) {
-    return null;
-  }
-
-  const optionValues = candidateCells.slice(0, -1);
-  if (optionValues.length < 2 || optionValues.length > 6) {
-    return null;
-  }
-
-  const record = questionImportRowSchema.parse({
-    question_type: questionType,
-    stem,
-    option_a: optionValues[0],
-    option_b: optionValues[1],
-    option_c: optionValues[2],
-    option_d: optionValues[3],
-    option_e: optionValues[4],
-    option_f: optionValues[5],
-    correct_answer: correctAnswer,
-    law_source: lawSource,
-    sort_order: sortOrder,
-  });
-
-  const normalized = normalizeQuestionInput({
-    ...mapImportRowToQuestionInput(record),
-    sortOrder,
-  });
-
-  return questionImportDraftSchema.parse({
-    ...normalized,
-    sortOrder,
-    sourceLabel: buildSourceRowLabel([row.rowNumber]),
-    sourceContent: row.content,
-    sourceRowNumbers: [row.rowNumber],
-  });
-}
-
 function buildSourceRowStatuses(
   rows: SheetRow[],
   drafts: QuestionImportDraftInput[],
@@ -741,6 +817,8 @@ export function parseStandardTemplateDrafts(
   const normalizedDrafts = normalizeDraftSortOrders(drafts, startingSortOrder);
   return {
     templateType: QuestionImportTemplateType.STANDARD,
+    schemaMode: "STANDARD",
+    schemaSummary: standardTemplateSchemaSummary,
     drafts: normalizedDrafts,
     sourceRows: buildSourceRowStatuses(rows, normalizedDrafts, failedRows, [
       rows[0].rowNumber,
@@ -748,259 +826,91 @@ export function parseStandardTemplateDrafts(
   } satisfies Omit<ParsedWorkbookResult, "sourceSheetName">;
 }
 
-function buildAiChunks(rows: SheetRow[]) {
-  const env = getServerEnv();
-  const chunks: SheetRow[][] = [];
-  let currentChunk: SheetRow[] = [];
-  let currentLength = 0;
-
-  for (const row of rows) {
-    const rowText = `第 ${row.rowNumber} 行 | ${row.content}`;
-    const nextLength =
-      currentLength + rowText.length + (currentChunk.length > 0 ? 1 : 0);
-
-    if (
-      currentChunk.length >= env.AI_SPLIT_CHUNK_ROW_LIMIT ||
-      nextLength > env.AI_SPLIT_CHUNK_TEXT_LIMIT
-    ) {
-      if (currentChunk.length > 0) {
-        chunks.push(currentChunk);
-      }
-
-      currentChunk = [row];
-      currentLength = rowText.length;
-      continue;
-    }
-
-    currentChunk.push(row);
-    currentLength = nextLength;
-  }
-
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk);
-  }
-
-  return chunks;
-}
-
-function isFatalAiError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return /AI_SPLIT_API_KEY|调用失败|未配置/.test(error.message);
-}
-
-async function parseAiChunkRows(
-  rows: SheetRow[],
-  startingSortOrder: number,
-): Promise<{
-  drafts: QuestionImportDraftInput[];
-  failedRows: FailedSourceRow[];
-}> {
-  if (rows.length === 0) {
-    return {
-      drafts: [],
-      failedRows: [],
-    };
-  }
-
-  const aiRows: AiSourceRowInput[] = rows.map((row) => ({
-    rowNumber: row.rowNumber,
-    content: row.content,
-  }));
-
-  try {
-    return {
-      drafts: await splitQuestionsWithAi(aiRows, startingSortOrder),
-      failedRows: [],
-    };
-  } catch (error) {
-    if (isFatalAiError(error)) {
-      throw error;
-    }
-
-    if (rows.length === 1) {
-      const fallbackDraft = tryParseSingleRowFallback(
-        rows[0],
-        startingSortOrder,
-      );
-      if (fallbackDraft) {
-        logger.warn(
-          {
-            rowNumber: rows[0].rowNumber,
-            reason: error instanceof Error ? error.message : String(error),
-          },
-          "AI 单行拆题失败，已回退到本地兜底解析",
-        );
-
-        return {
-          drafts: [fallbackDraft],
-          failedRows: [],
-        };
-      }
-
-      return {
-        drafts: [],
-        failedRows: [
-          {
-            rowNumber: rows[0].rowNumber,
-            content: rows[0].content,
-            reason:
-              error instanceof Error ? error.message : "AI 未识别为完整题目",
-          },
-        ],
-      };
-    }
-
-    logger.warn(
-      {
-        rowCount: rows.length,
-        startingSortOrder,
-      },
-      "AI 分块解析失败，自动缩小分块重试",
-    );
-
-    const middleIndex = Math.ceil(rows.length / 2);
-    const left = await parseAiChunkRows(
-      rows.slice(0, middleIndex),
-      startingSortOrder,
-    );
-    const nextSortOrder = Math.max(
-      startingSortOrder,
-      ...left.drafts.map((draft) => draft.sortOrder + 1),
-    );
-    const right = await parseAiChunkRows(
-      rows.slice(middleIndex),
-      nextSortOrder,
-    );
-
-    return {
-      drafts: [...left.drafts, ...right.drafts],
-      failedRows: [...left.failedRows, ...right.failedRows],
-    };
-  }
-}
-
 async function parseRowsWithAi(
   batchId: string,
   rows: SheetRow[],
   startingSortOrder: number,
 ) {
-  const env = getServerEnv();
-  const chunks = buildAiChunks(rows);
-  const controller = new AiSplitConcurrencyController();
-  const drafts: QuestionImportDraftInput[] = [];
-  const sourceRows: QuestionImportSourceRowItem[] = [];
-  const pendingChunks = new Map<number, PersistableAiChunkResult>();
-  let nextChunkToPersist = 0;
-  let nextSortOrder = startingSortOrder;
-  let persistChain = Promise.resolve();
+  const totalStartedAt = Date.now();
+  logger.info(
+    { batchId, rowCount: rows.length },
+    "导题批次开始识别整批列语义",
+  );
 
   await initializeBatchProgress(batchId, {
     totalSourceRows: rows.length,
     processedSourceRows: 0,
-    totalChunks: chunks.length,
+    totalChunks: 1,
     processedChunks: 0,
-    currentConcurrency: controller.getLimit(),
+    currentConcurrency: 1,
   });
 
-  const flushReadyChunks = async () => {
-    while (pendingChunks.has(nextChunkToPersist)) {
-      const chunk = pendingChunks.get(nextChunkToPersist);
-      if (!chunk) {
-        break;
-      }
-
-      pendingChunks.delete(nextChunkToPersist);
-
-      const normalizedChunkDrafts = assignSequentialSortOrders(
-        chunk.drafts,
-        nextSortOrder,
-      );
-      nextSortOrder += normalizedChunkDrafts.length;
-
-      const chunkSourceRows = buildSourceRowStatuses(
-        chunk.rows,
-        normalizedChunkDrafts,
-        chunk.failedRows,
-      );
-
-      await appendBatchChunkParseResult(batchId, {
-        drafts: normalizedChunkDrafts,
-        sourceRows: chunkSourceRows,
-      });
-      drafts.push(...normalizedChunkDrafts);
-      sourceRows.push(...chunkSourceRows);
-
-      await syncBatchProcessingProgress(batchId, {
-        processedSourceRowsIncrement: chunk.rows.length,
-        processedChunksIncrement: 1,
-        currentConcurrency: controller.getLimit(),
-      });
-
-      nextChunkToPersist += 1;
-    }
-  };
-
-  await mapWithAdaptiveConcurrency(
-    chunks,
-    controller,
-    async (chunkRows, chunkIndex): Promise<void> => {
-      let rateLimitRecoveries = 0;
-
-      while (true) {
-        try {
-          const parsed = await parseAiChunkRows(chunkRows, startingSortOrder);
-          const persistTask = persistChain.then(async () => {
-            pendingChunks.set(chunkIndex, {
-              rows: chunkRows,
-              drafts: parsed.drafts,
-              failedRows: parsed.failedRows,
-            });
-            await flushReadyChunks();
-          });
-          persistChain = persistTask.then(
-            () => undefined,
-            () => undefined,
-          );
-          await persistTask;
-
-          await controller.recordSuccess({
-            onStateChange: async (state) => {
-              await syncBatchProcessingProgress(batchId, {
-                currentConcurrency: state.currentConcurrency,
-              });
-            },
-          });
-          return;
-        } catch (error) {
-          if (!isAiRateLimitError(error)) {
-            throw error;
-          }
-
-          rateLimitRecoveries += 1;
-          await controller.recordRateLimit({
-            onStateChange: async (state) => {
-              await syncBatchProcessingProgress(batchId, {
-                currentConcurrency: state.currentConcurrency,
-              });
-            },
-          });
-
-          if (rateLimitRecoveries > env.AI_SPLIT_MAX_RETRIES + 2) {
-            throw error;
-          }
-
-          await controller.waitForCooldown();
-        }
-      }
-    },
+  const schemaDetectStartedAt = Date.now();
+  const detectedSchema = await detectStructuredQuestionImportSchema(rows);
+  const schemaDetectMs = Date.now() - schemaDetectStartedAt;
+  const parseStartedAt = Date.now();
+  const parsed = parseRowsWithStructuredSchema(
+    rows,
+    detectedSchema.summary,
+    startingSortOrder,
   );
-  await persistChain;
+  const parseMs = Date.now() - parseStartedAt;
+  const normalizedDrafts = assignSequentialSortOrders(
+    parsed.drafts,
+    startingSortOrder,
+  );
+  const sourceRows = buildSourceRowStatuses(
+    rows,
+    normalizedDrafts,
+    parsed.failedRows,
+    parsed.headerRowNumbers,
+  );
+
+  const persistStartedAt = Date.now();
+  await prisma.questionImportBatch.update({
+    where: { id: batchId },
+    data: {
+      schemaMode: detectedSchema.mode,
+      schemaSummary: serializeSchemaSummary(detectedSchema.summary),
+    },
+  });
+
+  await appendBatchChunkParseResult(batchId, {
+    drafts: normalizedDrafts,
+    sourceRows,
+  });
+
+  await syncBatchProcessingProgress(batchId, {
+    processedSourceRowsIncrement: rows.length,
+    processedChunksIncrement: 1,
+    currentConcurrency: 0,
+  });
+  const persistMs = Date.now() - persistStartedAt;
+  const totalMs = Date.now() - totalStartedAt;
+  const rowsPerSecond =
+    totalMs > 0 ? Number((rows.length / (totalMs / 1000)).toFixed(2)) : rows.length;
+
+  logger.info(
+    {
+      batchId,
+      mode: detectedSchema.mode,
+      rowCount: rows.length,
+      draftCount: normalizedDrafts.length,
+      failedRowCount: parsed.failedRows.length,
+      schemaDetectMs,
+      parseMs,
+      persistMs,
+      totalMs,
+      rowsPerSecond,
+    },
+    "导题批次已按整批 schema 完成解析",
+  );
+
   return {
-    templateType: QuestionImportTemplateType.AI,
-    drafts,
+    templateType: detectedSchema.templateType,
+    schemaMode: detectedSchema.mode,
+    schemaSummary: detectedSchema.summary,
+    drafts: normalizedDrafts,
     sourceRows,
     persistedDuringParsing: true,
   } satisfies Omit<ParsedWorkbookResult, "sourceSheetName">;
@@ -1041,6 +951,14 @@ async function parseWorkbookToDrafts(
     data: {
       sourceSheetName: firstSheetName,
       templateType,
+      schemaMode:
+        templateType === QuestionImportTemplateType.STANDARD
+          ? "STANDARD"
+          : null,
+      schemaSummary:
+        templateType === QuestionImportTemplateType.STANDARD
+          ? serializeSchemaSummary(standardTemplateSchemaSummary)
+          : Prisma.JsonNull,
     },
   });
 
@@ -1070,13 +988,13 @@ async function parseWorkbookToDrafts(
  * 管理 Excel 导题批次、解析结果和确认入库流程。
  *
  * 业务背景：
- * 导题文件来源分散且模板不稳定，系统需要同时支持标准模板的规则解析，以及非标准文件的 AI 识别。
+ * 导题文件来源分散且模板不稳定，系统需要同时支持标准模板的规则解析，以及非标准文件的列语义辅助识别。
  *
  * 核心逻辑：
- * 标准模板仅走规则解析，其他文件全部走 AI 拆题，并为每一行原始内容生成可查看的匹配状态。
+ * 标准模板直接走固定列映射；非标准 Excel 先识别整批 schema，再用后端固定规则逐行归一化和校验，并为每一行原始内容生成可查看的匹配状态。
  *
  * 关键约束：
- * 批次只有在 READY 状态下才允许删除草稿或确认入库；内容无法成题时保留失败记录，不再直接把整批判定为失败。
+ * 同一批次只能使用一套稳定 schema；schema 冲突时整批失败，行级异常只记录失败原因且不允许跳过规则直接入库。
  */
 export async function createQuestionImportBatch(
   bankId: string,
@@ -1112,8 +1030,107 @@ export async function createQuestionImportBatch(
   return batch;
 }
 
-export async function getQuestionImportBatchDetail(batchId: string) {
-  return buildQuestionImportBatchDetail(batchId);
+export async function getQuestionImportBatchDetail(
+  batchId: string,
+  options?: QuestionImportBatchDetailOptions,
+) {
+  return buildQuestionImportBatchDetail(batchId, options);
+}
+
+export async function getQuestionImportBatchSnapshot(batchId: string) {
+  const batch = await prisma.questionImportBatch.findUnique({
+    where: { id: batchId },
+    select: {
+      id: true,
+      fileName: true,
+      sourceSheetName: true,
+      templateType: true,
+      status: true,
+      schemaMode: true,
+      schemaSummary: true,
+      draftCount: true,
+      totalSourceRows: true,
+      processedSourceRows: true,
+      totalChunks: true,
+      processedChunks: true,
+      currentConcurrency: true,
+      lastError: true,
+      createdAt: true,
+      parsedAt: true,
+      confirmedAt: true,
+    },
+  });
+
+  if (!batch) {
+    throw new Error("导题批次不存在");
+  }
+
+  return mapBatchSummary(batch);
+}
+
+export async function listQuestionImportDraftsAfter(
+  batchId: string,
+  afterSortOrder: number,
+  take = 100,
+) {
+  const items = await prisma.questionImportDraft.findMany({
+    where: {
+      batchId,
+      isDeleted: false,
+      sortOrder: {
+        gt: afterSortOrder,
+      },
+    },
+    orderBy: {
+      sortOrder: "asc",
+    },
+    take,
+    select: {
+      id: true,
+      type: true,
+      stem: true,
+      options: true,
+      correctAnswers: true,
+      analysis: true,
+      lawSource: true,
+      sortOrder: true,
+      sourceLabel: true,
+      sourceContent: true,
+      sourceRowNumbers: true,
+      isDeleted: true,
+    },
+  });
+
+  return items.map(mapDraftRecord);
+}
+
+export async function listQuestionImportSourceRowsAfter(
+  batchId: string,
+  afterRowNumber: number,
+  take = 200,
+) {
+  const items = await prisma.questionImportSourceRow.findMany({
+    where: {
+      batchId,
+      rowNumber: {
+        gt: afterRowNumber,
+      },
+    },
+    orderBy: {
+      rowNumber: "asc",
+    },
+    take,
+    select: {
+      id: true,
+      rowNumber: true,
+      status: true,
+      content: true,
+      reason: true,
+      matchedSortOrders: true,
+    },
+  });
+
+  return items.map(mapSourceRowRecord);
 }
 
 export async function listQuestionImportBatchesForAdmin(
@@ -1148,6 +1165,8 @@ export async function listQuestionImportBatchesForAdmin(
       sourceSheetName: true,
       templateType: true,
       status: true,
+      schemaMode: true,
+      schemaSummary: true,
       draftCount: true,
       totalSourceRows: true,
       processedSourceRows: true,
@@ -1329,7 +1348,7 @@ export async function confirmQuestionImportBatch(
       }),
     );
 
-    let finalSortOrder = payload.sortOrder;
+    let finalSortOrder = payload.sortOrder ?? 0;
     if (finalSortOrder <= 0 || usedSortOrders.has(finalSortOrder)) {
       while (usedSortOrders.has(nextSortOrder)) {
         nextSortOrder += 1;
@@ -1346,6 +1365,7 @@ export async function confirmQuestionImportBatch(
       sourceRowNumbers: parseNumberArray(draft.sourceRowNumbers),
       createData: {
         bankId: batch.bankId,
+        importBatchId: batchId,
         ...payload,
         sortOrder: finalSortOrder,
         createdById: userId,
@@ -1516,19 +1536,21 @@ export async function processQuestionImportBatch(batchId: string) {
       },
     });
 
-    await tx.questionImportBatch.update({
-      where: { id: batchId },
-      data: {
-        status: QuestionImportBatchStatus.PROCESSING,
-        lastError: null,
-        parsedAt: null,
-        confirmedAt: null,
-        templateType: null,
-        sourceSheetName: null,
-        draftCount: 0,
-        totalSourceRows: 0,
-        processedSourceRows: 0,
-        totalChunks: 0,
+      await tx.questionImportBatch.update({
+        where: { id: batchId },
+        data: {
+          status: QuestionImportBatchStatus.PROCESSING,
+          lastError: null,
+          parsedAt: null,
+          confirmedAt: null,
+          templateType: null,
+          sourceSheetName: null,
+          schemaMode: null,
+          schemaSummary: Prisma.JsonNull,
+          draftCount: 0,
+          totalSourceRows: 0,
+          processedSourceRows: 0,
+          totalChunks: 0,
         processedChunks: 0,
         currentConcurrency: 0,
       },
@@ -1577,6 +1599,8 @@ export async function processQuestionImportBatch(batchId: string) {
         data: {
           sourceSheetName: parsed.sourceSheetName,
           templateType: parsed.templateType,
+          schemaMode: parsed.schemaMode,
+          schemaSummary: serializeSchemaSummary(parsed.schemaSummary),
           status:
             parsed.drafts.length > 0
               ? QuestionImportBatchStatus.READY

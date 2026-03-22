@@ -1,7 +1,7 @@
 import { BankStatus } from "@prisma/client";
 import Link from "next/link";
 
-import { BankStatusButton } from "@/features/admin/components/bank-status-button";
+import { BankMoreActions } from "@/features/admin/components/bank-more-actions";
 
 interface BankListTableProps {
   banks: Array<{
@@ -22,16 +22,16 @@ function getStatusLabel(status: BankStatus) {
 
 export function BankListTable({ banks }: BankListTableProps) {
   return (
-    <div className="admin-table-wrap" style={{ marginTop: 18 }}>
+    <div className="admin-table-wrap">
       <table className="admin-table is-bank-table">
         <thead>
           <tr>
-            <th style={{ width: "32%" }}>名称</th>
-            <th style={{ width: 180 }}>编码</th>
-            <th style={{ width: 120 }}>状态</th>
-            <th style={{ width: 96 }}>排序</th>
-            <th style={{ width: 96 }}>题目</th>
-            <th style={{ width: 96 }}>法条</th>
+            <th style={{ width: "34%" }}>题库名称</th>
+            <th style={{ width: 176 }}>编码</th>
+            <th style={{ width: 108 }}>状态</th>
+            <th style={{ width: 84 }}>排序</th>
+            <th style={{ width: 96 }}>题目数</th>
+            <th style={{ width: 96 }}>资料数</th>
             <th style={{ width: 260 }}>操作</th>
           </tr>
         </thead>
@@ -60,16 +60,8 @@ export function BankListTable({ banks }: BankListTableProps) {
               <td>{bank.questionCount}</td>
               <td>{bank.statuteDocumentCount}</td>
               <td className="admin-table-actions-cell">
-                <div className="admin-table-actions">
+                <div className="admin-table-actions is-compact">
                   <div className="admin-table-action-links">
-                    <Link
-                      href={`/admin/banks/${bank.id}/edit`}
-                      className="admin-table-link"
-                      prefetch={false}
-                    >
-                      编辑
-                    </Link>
-                    <span className="admin-table-action-divider">|</span>
                     <Link
                       href={`/admin/banks/${bank.id}/questions`}
                       className="admin-table-link"
@@ -77,22 +69,20 @@ export function BankListTable({ banks }: BankListTableProps) {
                     >
                       题目管理
                     </Link>
-                    <span className="admin-table-action-divider">|</span>
+                    <span className="admin-table-action-divider">/</span>
                     <Link
                       href={`/admin/banks/${bank.id}/statutes`}
                       className="admin-table-link"
                       prefetch={false}
                     >
-                      法条资料
+                      资料管理
                     </Link>
                   </div>
-                  <div className="admin-table-action-row">
-                    <BankStatusButton
-                      bankId={bank.id}
-                      status={bank.status}
-                      variant="table"
-                    />
-                  </div>
+                  <BankMoreActions
+                    bankId={bank.id}
+                    editHref={`/admin/banks/${bank.id}/edit`}
+                    status={bank.status}
+                  />
                 </div>
               </td>
             </tr>

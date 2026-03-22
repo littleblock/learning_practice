@@ -3,10 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useMobileBusy } from "@/features/mobile/components/mobile-busy-provider";
+import { APP_NAME } from "@/shared/constants/app";
 import { withAppBasePath } from "@/shared/utils/app-path";
 
 export function LoginForm() {
   const router = useRouter();
+  const { startBusy } = useMobileBusy();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -20,6 +23,11 @@ export function LoginForm() {
 
     setErrorMessage("");
     setIsSubmitting(true);
+    const busyHandle = startBusy({
+      title: "正在登录学习账号",
+      description: "系统正在验证账号和密码，验证通过后会自动进入题库列表。",
+      keepUntilPathChange: true,
+    });
 
     try {
       const response = await fetch(withAppBasePath("/api/auth/login"), {
@@ -38,12 +46,14 @@ export function LoginForm() {
       };
 
       if (!response.ok) {
+        busyHandle.clear();
         setErrorMessage(payload.message ?? "登录失败，请检查账号和密码。");
         return;
       }
 
       router.replace("/m/banks");
     } catch {
+      busyHandle.clear();
       setErrorMessage("登录请求失败，请稍后重试。");
     } finally {
       setIsSubmitting(false);
@@ -60,13 +70,15 @@ export function LoginForm() {
             marginBottom: 10,
           }}
         >
-          法律刷题系统
+          {APP_NAME}
         </p>
         <h1>欢迎回来</h1>
-        <p>输入学习账号后即可开始刷题、查看错题本，并继续上一轮练习进度。</p>
+        <p>
+          输入学习账号后即可开始刷题、查看错题本，并继续上一轮练习进度。
+        </p>
       </div>
 
-      <div className="mobile-hero-icon">法</div>
+      <div className="mobile-hero-icon">刷</div>
 
       <form onSubmit={handleSubmit}>
         <div className="mobile-form-stack">
@@ -91,7 +103,7 @@ export function LoginForm() {
           {isSubmitting ? (
             <div className="action-loading-notice">
               <strong>正在登录学习账号</strong>
-              <span>系统会在验证通过后自动进入题库列表，请稍候。</span>
+              <span>验证通过后会自动进入题库列表，请不要重复点击登录按钮。</span>
             </div>
           ) : null}
           <button

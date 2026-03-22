@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   DocumentProcessStatus,
   PracticeMode,
   PracticeSessionStatus,
@@ -28,6 +28,12 @@ export interface PracticeQuestionView {
   isCorrect: boolean | null;
   matchedExcerpt: string | null;
   matchedScore: number | null;
+}
+
+export interface PracticeAiExplanationView {
+  questionId: string;
+  content: string;
+  usedFallback: boolean;
 }
 
 export interface PracticeSessionView {
@@ -104,6 +110,18 @@ export interface QuestionImportSourceRowItem {
   matchedSortOrders: number[];
 }
 
+export interface QuestionImportSchemaSummary {
+  headerRowCount: number;
+  questionTypeColumn: number | null;
+  stemColumn: number | null;
+  optionColumns: number[];
+  answerColumn: number | null;
+  analysisColumn: number | null;
+  lawSourceColumn: number | null;
+  ignoredColumns: number[];
+  answerEncoding: string | null;
+}
+
 export interface QuestionImportBatchDetail {
   id: string;
   bankId: string;
@@ -111,7 +129,10 @@ export interface QuestionImportBatchDetail {
   sourceSheetName: string | null;
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
+  schemaMode: string | null;
+  schemaSummary: QuestionImportSchemaSummary | null;
   draftCount: number;
+  draftTotal: number;
   totalSourceRows: number;
   processedSourceRows: number;
   totalChunks: number;
@@ -122,6 +143,7 @@ export interface QuestionImportBatchDetail {
   parsedAt: string | null;
   confirmedAt: string | null;
   drafts: QuestionImportDraftItem[];
+  sourceRowTotal: number;
   sourceRows: QuestionImportSourceRowItem[];
 }
 
@@ -131,6 +153,8 @@ export interface QuestionImportBatchSummary {
   sourceSheetName: string | null;
   templateType: QuestionImportTemplateType | null;
   status: QuestionImportBatchStatus;
+  schemaMode: string | null;
+  schemaSummary: QuestionImportSchemaSummary | null;
   draftCount: number;
   totalSourceRows: number;
   processedSourceRows: number;

@@ -1,10 +1,10 @@
 import { UserRole } from "@prisma/client";
 import Link from "next/link";
 
-import { AdminPagination } from "@/features/admin/components/admin-pagination";
 import { BankFilters } from "@/features/admin/components/admin-filters";
-import { BankListTable } from "@/features/admin/components/bank-list-table";
+import { AdminPagination } from "@/features/admin/components/admin-pagination";
 import { AdminShell } from "@/features/admin/components/admin-shell";
+import { BankListTable } from "@/features/admin/components/bank-list-table";
 import { requirePageRole } from "@/server/auth/guards";
 import { listBanksForAdmin } from "@/server/services/bank-service";
 
@@ -21,29 +21,38 @@ export default async function AdminBanksPage({
 
   return (
     <AdminShell activeKey="banks" userName={session.user.displayName}>
-      <section className="admin-panel admin-page-panel" style={{ padding: 28 }}>
+      <section className="admin-panel admin-page-panel admin-summary-section">
         <div className="admin-section-header">
-          <div className="mobile-page-header">
+          <div className="admin-page-header-copy">
             <h1>题库管理</h1>
-            <p>查看全部题库，支持按名称、编码和状态快速筛选。</p>
+            <p>集中维护题库入口、启用状态、题目与资料规模。</p>
           </div>
           <Link href="/admin/banks/new" className="admin-primary-link">
-            + 新增题库
+            新增题库
           </Link>
         </div>
 
-        <div className="admin-summary-grid">
-          <div className="admin-summary-card">
-            <span>当前题库数</span>
-            <strong>{result.total}</strong>
+        <div className="admin-summary-grid is-compact">
+          <div className="admin-summary-card is-inline">
+            <span>题库总数</span>
+            <strong>{result.summary.bankTotal}</strong>
           </div>
-          <div className="admin-summary-card">
-            <span>管理入口</span>
-            <strong>题目与法条资料</strong>
+          <div className="admin-summary-card is-inline">
+            <span>已启用题库数</span>
+            <strong>{result.summary.activeBankTotal}</strong>
           </div>
-          <div className="admin-summary-card">
-            <span>常用操作</span>
-            <strong>筛选、编辑、启停、进入下属页面</strong>
+          <div className="admin-summary-card is-inline">
+            <span>已启用题目数</span>
+            <strong>{result.summary.activeQuestionTotal}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="admin-panel admin-page-panel admin-list-section">
+        <div className="admin-section-header is-compact">
+          <div>
+            <h2>题库列表</h2>
+            <p className="page-note">支持按名称、编码和状态快速筛选。</p>
           </div>
         </div>
 
@@ -53,9 +62,11 @@ export default async function AdminBanksPage({
           pageSize={String(result.pageSize)}
         />
 
-        <p className="page-note" style={{ marginTop: 14 }}>
-          当前共匹配到 {result.total} 个题库。
-        </p>
+        <div className="admin-inline-status-row">
+          <p className="page-note" style={{ margin: 0 }}>
+            当前共匹配到 {result.total} 个题库。
+          </p>
+        </div>
 
         {result.items.length === 0 ? (
           <section className="admin-empty-state">

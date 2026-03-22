@@ -17,20 +17,18 @@ export function BankFilters({
       className="admin-filter-form admin-bank-filter-form"
     >
       <input type="hidden" name="page" value="1" />
-      {pageSize ? (
-        <input type="hidden" name="pageSize" value={pageSize} />
-      ) : null}
+      {pageSize ? <input type="hidden" name="pageSize" value={pageSize} /> : null}
       <input
         name="keyword"
         defaultValue={keyword}
-        placeholder="搜索名称或编码"
+        placeholder="搜索题库名称或编码"
       />
       <select name="status" defaultValue={status ?? ""}>
         <option value="">全部状态</option>
         <option value={BankStatus.ACTIVE}>已启用</option>
         <option value={BankStatus.INACTIVE}>已停用</option>
       </select>
-      <button type="submit">筛选</button>
+      <button type="submit">搜索</button>
     </form>
   );
 }
@@ -57,17 +55,13 @@ export function QuestionFilters({
     >
       <input type="hidden" name="page" value="1" />
       {Object.entries(preservedQuery).map(([key, value]) =>
-        value ? (
-          <input key={key} type="hidden" name={key} value={value} />
-        ) : null,
+        value ? <input key={key} type="hidden" name={key} value={value} /> : null,
       )}
-      {pageSize ? (
-        <input type="hidden" name="pageSize" value={pageSize} />
-      ) : null}
+      {pageSize ? <input type="hidden" name="pageSize" value={pageSize} /> : null}
       <input
         name="keyword"
         defaultValue={keyword}
-        placeholder="按题干关键词搜索"
+        placeholder="搜索题干关键词"
       />
       <select name="type" defaultValue={type ?? ""}>
         <option value="">全部题型</option>
@@ -78,7 +72,7 @@ export function QuestionFilters({
       <input
         name="lawSource"
         defaultValue={lawSource}
-        placeholder="按答案来源筛选"
+        placeholder="搜索答案来源"
       />
       <button type="submit">筛选</button>
     </form>

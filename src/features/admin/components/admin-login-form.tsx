@@ -62,9 +62,7 @@ export function AdminLoginForm() {
       <section className="admin-panel admin-login-panel">
         <div className="mobile-page-header">
           <h1>管理员登录</h1>
-          <p>
-            请输入管理员账号和密码，登录后进入后台维护题库、题目与法条资料。
-          </p>
+          <p>请输入管理员账号和密码，登录后进入后台维护题库、题目与资料。</p>
         </div>
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
           <Input
@@ -91,9 +89,7 @@ export function AdminLoginForm() {
               aria-live="polite"
             >
               <strong>
-                {isRedirecting
-                  ? "验证通过，正在进入后台"
-                  : "正在验证管理员身份"}
+                {isRedirecting ? "验证通过，正在进入后台" : "正在验证管理员身份"}
               </strong>
               <span>
                 {isRedirecting

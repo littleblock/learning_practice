@@ -138,6 +138,7 @@ model QuestionBank {
 model Question {
   id                 String                 @id @default(cuid())
   bankId             String
+  importBatchId      String?
   createdById        String?
   updatedById        String?
   type               QuestionType
@@ -158,10 +159,12 @@ model Question {
   attempts           PracticeAttempt[]
   questionStats      UserQuestionStat[]
   statuteMatch       QuestionStatuteMatch?
+  importBatch        QuestionImportBatch?   @relation("QuestionImportedByBatch", fields: [importBatchId], references: [id], onDelete: SetNull)
 
   @@unique([bankId, sortOrder])
   @@index([bankId, sortOrder])
   @@index([bankId, type])
+  @@index([importBatchId])
   @@index([createdById])
   @@index([updatedById])
 }
@@ -182,6 +185,8 @@ model QuestionImportBatch {
   totalChunks    Int                        @default(0)
   processedChunks Int                       @default(0)
   currentConcurrency Int                    @default(0)
+  schemaMode     String?
+  schemaSummary  Json?
   createdAt      DateTime                   @default(now())
   updatedAt      DateTime                   @updatedAt
   parsedAt       DateTime?
@@ -190,6 +195,7 @@ model QuestionImportBatch {
   createdBy      User                       @relation("QuestionImportBatchCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   drafts         QuestionImportDraft[]
   sourceRows     QuestionImportSourceRow[]
+  importedQuestions Question[]              @relation("QuestionImportedByBatch")
 
   @@index([bankId, status, createdAt])
   @@index([createdById, createdAt])

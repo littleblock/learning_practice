@@ -50,7 +50,7 @@ async function generateNextBankCode(
 
   if (latestBank && latestSequence === null) {
     throw new Error(
-      `题库编码 ${latestBank.code} 不符合系统规则，无法生成新编码`,
+      `题库编码 ${latestBank.code} 不符合系统规则，无法生成新的编码。`,
     );
   }
 
@@ -281,7 +281,24 @@ export async function listBanksForAdmin(rawQuery: unknown) {
     ...(query.status ? { status: query.status } : {}),
   };
 
-  const total = await prisma.questionBank.count({ where });
+  const [total, bankTotal, activeBankTotal, activeQuestionTotal] =
+    await prisma.$transaction([
+      prisma.questionBank.count({ where }),
+      prisma.questionBank.count(),
+      prisma.questionBank.count({
+        where: {
+          status: BankStatus.ACTIVE,
+        },
+      }),
+      prisma.question.count({
+        where: {
+          bank: {
+            status: BankStatus.ACTIVE,
+          },
+        },
+      }),
+    ]);
+
   const { skip, take, page, pageSize } = resolvePagination(
     query.page,
     query.pageSize,
@@ -294,6 +311,11 @@ export async function listBanksForAdmin(rawQuery: unknown) {
     total,
     page,
     pageSize,
+    summary: {
+      bankTotal,
+      activeBankTotal,
+      activeQuestionTotal,
+    },
   };
 }
 

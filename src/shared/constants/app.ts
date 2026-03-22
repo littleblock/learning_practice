@@ -1,4 +1,4 @@
-export const APP_NAME = "法律刷题系统";
+export const APP_NAME = "刷题小工具";
 
 export const SESSION_COOKIE_NAME = "learning_practice_session";
 

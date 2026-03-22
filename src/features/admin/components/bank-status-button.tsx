@@ -14,7 +14,7 @@ export function BankStatusButton({
 }: {
   bankId: string;
   status: BankStatus;
-  variant?: "default" | "table";
+  variant?: "default" | "table" | "menu";
 }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,8 +72,15 @@ export function BankStatusButton({
     <Button
       loading={isSubmitting || isRefreshing}
       onClick={toggleStatus}
-      className={variant === "table" ? "admin-table-toggle" : undefined}
+      className={
+        variant === "table"
+          ? "admin-table-toggle"
+          : variant === "menu"
+            ? "admin-table-toggle is-menu"
+            : undefined
+      }
       disabled={isSubmitting || isRefreshing}
+      size={variant === "menu" ? "small" : "middle"}
     >
       {status === BankStatus.ACTIVE ? "停用题库" : "启用题库"}
     </Button>

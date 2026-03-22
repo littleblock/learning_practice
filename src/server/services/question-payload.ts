@@ -6,7 +6,7 @@ import type {
   UpsertQuestionInput,
 } from "@/shared/schemas/question";
 
-type NormalizedQuestionInput = Omit<UpsertQuestionInput, "sortOrder"> & {
+export type NormalizedQuestionInput = Omit<UpsertQuestionInput, "sortOrder"> & {
   sortOrder?: number;
 };
 
@@ -189,7 +189,10 @@ export function mapImportRowToQuestionInput(
 }
 
 export function normalizeQuestionInput(
-  input: UpsertQuestionInput | QuestionImportDraftInput,
+  input:
+    | UpsertQuestionInput
+    | QuestionImportDraftInput
+    | NormalizedQuestionInput,
 ) {
   return {
     type: input.type,

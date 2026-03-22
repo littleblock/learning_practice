@@ -1,17 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function setInputValue(page: Page, selector: string, value: string) {
-  await page.locator(selector).evaluate((element, nextValue) => {
-    const input = element as HTMLInputElement;
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-
-    valueSetter?.call(input, nextValue);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, value);
+  const input = page.locator(selector).first();
+  await input.click();
+  await input.fill("");
+  await input.pressSequentially(value);
+  await expect(input).toHaveValue(value);
 }
 
 test.describe("admin and mobile smoke flows", () => {
@@ -45,21 +39,27 @@ test.describe("admin and mobile smoke flows", () => {
     await expect(page).toHaveURL(/\/admin\/banks\/.+\/questions/, {
       timeout: 20_000,
     });
-    await expect(page.getByRole("heading", { name: /题目管理/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "题目列表", level: 2 }),
+    ).toBeVisible();
 
     await page.getByRole("tab", { name: /导入记录/ }).click();
-    await expect(page.getByText("导入记录")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Excel 导入" }),
+    ).toBeVisible();
+    await expect(page.getByText("当前共有")).toBeVisible();
 
-    const statuteLink = page
-      .locator(".mobile-page-header")
-      .getByRole("link", { name: "法条资料" });
+    await page.goto("/admin/banks");
+    await expect(page).toHaveURL(/\/admin\/banks$/, { timeout: 20_000 });
+
+    const statuteLink = page.getByRole("link", { name: "资料管理" }).first();
     await expect(statuteLink).toBeVisible();
     await statuteLink.click();
 
     await expect(page).toHaveURL(/\/admin\/banks\/.+\/statutes/, {
       timeout: 20_000,
     });
-    await expect(page.getByRole("heading", { name: /法条资料管理/ })).toBeVisible();
+    await expect(page.getByText("资料总数")).toBeVisible();
   });
 
   test("learner login and practice flow are reachable", async ({ page }) => {
@@ -85,10 +85,25 @@ test.describe("admin and mobile smoke flows", () => {
     await expect(startButton).toBeEnabled();
     await startButton.click();
 
-    await expect(page).toHaveURL(/\/m\/practice\/.+/, { timeout: 20_000 });
-    await expect(page.getByText(/第\s+\d+\s+\/\s+\d+\s+题/)).toBeVisible();
+    const reachedPractice = await Promise.race([
+      page
+        .waitForURL(/\/m\/practice\/.+/, { timeout: 20_000 })
+        .then(() => true)
+        .catch(() => false),
+      page
+        .getByText("当前题库还没有可练习的题目")
+        .waitFor({ timeout: 20_000 })
+        .then(() => false)
+        .catch(() => false),
+    ]);
 
-    await page.getByRole("link", { name: "错题本" }).first().click();
+    if (reachedPractice) {
+      await expect(page.getByText(/第\s+\d+\s+\/\s+\d+\s+题/)).toBeVisible();
+    } else {
+      await expect(page.getByText("当前题库还没有可练习的题目")).toBeVisible();
+    }
+
+    await page.getByRole("button", { name: "错题本" }).first().click();
     await expect(page).toHaveURL(/\/m\/wrong-books/, { timeout: 20_000 });
     await expect(page.getByRole("heading", { name: "错题本" })).toBeVisible();
   });

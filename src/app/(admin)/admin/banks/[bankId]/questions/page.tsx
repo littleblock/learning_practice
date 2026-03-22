@@ -1,8 +1,8 @@
 import { UserRole } from "@prisma/client";
 import Link from "next/link";
 
-import { QuestionManager } from "@/features/admin/components/question-manager";
 import { AdminShell } from "@/features/admin/components/admin-shell";
+import { QuestionManager } from "@/features/admin/components/question-manager";
 import { requirePageRole } from "@/server/auth/guards";
 import { prisma } from "@/server/db/client";
 import {
@@ -36,18 +36,15 @@ export default async function AdminQuestionsPage({
   if (!bank) {
     return (
       <AdminShell activeKey="banks" userName={session.user.displayName}>
-        <section
-          className="admin-panel admin-page-panel"
-          style={{ padding: 28 }}
-        >
-          <div className="mobile-page-header">
-            <h1>题库不存在</h1>
-            <p>当前题库可能已被删除或无权访问，请返回题库列表重新选择。</p>
-          </div>
-          <div className="inline-actions">
-            <Link href="/admin/banks" className="admin-secondary-link">
+        <section className="admin-panel admin-page-panel admin-page-section">
+          <div className="admin-page-backline">
+            <Link href="/admin/banks" className="admin-text-link">
               返回题库列表
             </Link>
+          </div>
+          <div className="admin-page-header-copy is-compact">
+            <h1>题库不存在</h1>
+            <p>当前题库可能已被删除或无权访问，请返回题库列表重新选择。</p>
           </div>
         </section>
       </AdminShell>
@@ -97,10 +94,12 @@ export default async function AdminQuestionsPage({
     importBatchResultPromise,
   ]);
 
-  const questionPage = questionListResult?.page ?? questionCountResult?.page ?? 1;
+  const questionPage =
+    questionListResult?.page ?? questionCountResult?.page ?? 1;
   const questionPageSize =
     questionListResult?.pageSize ?? questionCountResult?.pageSize ?? 10;
-  const questionTotal = questionListResult?.total ?? questionCountResult?.total ?? 0;
+  const questionTotal =
+    questionListResult?.total ?? questionCountResult?.total ?? 0;
   const nextSortOrder = questionListResult?.nextSortOrder ?? 1;
   const importBatchPage =
     importBatchListResult?.page ?? importBatchResult?.page ?? importPage;
@@ -113,68 +112,48 @@ export default async function AdminQuestionsPage({
 
   return (
     <AdminShell activeKey="banks" userName={session.user.displayName}>
-      <div className="list-grid">
-        <section
-          className="admin-panel admin-page-panel"
-          style={{ padding: 28 }}
-        >
-          <div className="mobile-page-header">
-            <div className="inline-actions" style={{ marginBottom: 12 }}>
-              <Link href="/admin/banks" className="admin-secondary-link">
-                返回题库列表
-              </Link>
-              <Link
-                href={`/admin/banks/${bank.id}/edit`}
-                className="admin-secondary-link"
-                prefetch={false}
-              >
-                编辑题库
-              </Link>
-              <Link
-                href={`/admin/banks/${bank.id}/statutes`}
-                className="admin-secondary-link"
-                prefetch={false}
-              >
-                法条资料
-              </Link>
-            </div>
-            <h1>{bank.name} / 题目管理</h1>
-            <p>
-              题库编码：{bank.code}。支持分页查看、单题维护、Excel
-              导题解析和逐行失败判定。
-            </p>
-          </div>
-        </section>
+      <section className="admin-panel admin-page-panel admin-page-section">
+        <div className="admin-page-backline">
+          <Link href="/admin/banks" className="admin-text-link">
+            返回题库列表
+          </Link>
+        </div>
+        <div className="admin-page-header-copy is-compact">
+          <h1>{bank.name}</h1>
+          <p>
+            题库编码 {bank.code}，当前页面聚焦题目列表和导入记录管理。
+          </p>
+        </div>
+      </section>
 
-        <QuestionManager
-          bankId={bank.id}
-          questions={questionListResult?.items ?? []}
-          nextSortOrder={nextSortOrder}
-          importBatches={importBatchListResult?.items ?? []}
-          importBatchPage={importBatchPage}
-          importBatchPageSize={importBatchPageSize}
-          importBatchTotal={importBatchTotal}
-          questionQuery={{
-            keyword,
-            type,
-            lawSource,
-            page: String(questionPage),
-            pageSize: String(questionPageSize),
-            recordPage: String(importBatchPage),
-            recordPageSize: String(importBatchPageSize),
-            tab: activeTab,
-          }}
-          activeTab={activeTab}
-          questionPage={questionPage}
-          questionPageSize={questionPageSize}
-          questionTotal={questionTotal}
-          keyword={keyword}
-          type={type}
-          lawSource={lawSource}
-          recordPage={String(importBatchPage)}
-          recordPageSize={String(importBatchPageSize)}
-        />
-      </div>
+      <QuestionManager
+        bankId={bank.id}
+        questions={questionListResult?.items ?? []}
+        nextSortOrder={nextSortOrder}
+        importBatches={importBatchListResult?.items ?? []}
+        importBatchPage={importBatchPage}
+        importBatchPageSize={importBatchPageSize}
+        importBatchTotal={importBatchTotal}
+        questionQuery={{
+          keyword,
+          type,
+          lawSource,
+          page: String(questionPage),
+          pageSize: String(questionPageSize),
+          recordPage: String(importBatchPage),
+          recordPageSize: String(importBatchPageSize),
+          tab: activeTab,
+        }}
+        activeTab={activeTab}
+        questionPage={questionPage}
+        questionPageSize={questionPageSize}
+        questionTotal={questionTotal}
+        keyword={keyword}
+        type={type}
+        lawSource={lawSource}
+        recordPage={String(importBatchPage)}
+        recordPageSize={String(importBatchPageSize)}
+      />
     </AdminShell>
   );
 }

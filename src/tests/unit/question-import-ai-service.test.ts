@@ -21,7 +21,7 @@ function applyTestEnv() {
 }
 
 describe("question import ai service", () => {
-  it("接受模型返回的空字段并补齐来源行信息", async () => {
+  it("AI 列语义识别会把缺失列规范化为 null 并保留忽略列", async () => {
     applyTestEnv();
 
     global.fetch = vi.fn().mockResolvedValue(
@@ -30,22 +30,15 @@ describe("question import ai service", () => {
           choices: [
             {
               message: {
-                content: JSON.stringify([
-                  {
-                    type: "single",
-                    stem: "这是一道用于校验 AI 导题的测试题目",
-                    options: [
-                      { label: "A", text: "选项A" },
-                      { label: "B", text: "选项B" },
-                    ],
-                    correctAnswers: ["A"],
-                    analysis: null,
-                    lawSource: null,
-                    sourceLabel: null,
-                    sourceContent: null,
-                    sourceRowNumbers: [1],
-                  },
-                ]),
+                content: JSON.stringify({
+                  headerRowCount: 1,
+                  questionTypeColumn: 0,
+                  stemColumn: 2,
+                  optionColumns: [3, 4, 5, 6],
+                  answerColumn: 8,
+                  ignoredColumns: [1],
+                  answerEncoding: "NUMERIC_INDEX",
+                }),
               },
             },
           ],
@@ -59,47 +52,65 @@ describe("question import ai service", () => {
       ),
     ) as typeof global.fetch;
 
-    const { splitQuestionsWithAi } = await import(
+    const { detectQuestionImportSchemaWithAi } = await import(
       "@/server/services/question-import-ai-service"
     );
 
     await expect(
-      splitQuestionsWithAi([{ rowNumber: 1, content: "测试内容" }], 1),
-    ).resolves.toMatchObject([
-      {
-        stem: "这是一道用于校验 AI 导题的测试题目",
-        analysis: null,
-        lawSource: null,
-        sourceLabel: "第 1 行",
-        sourceContent: "第 1 行 | 测试内容",
-        sourceRowNumbers: [1],
-        sortOrder: 1,
-      },
-    ]);
+      detectQuestionImportSchemaWithAi([
+        {
+          rowNumber: 1,
+          values: [
+            "题型分类",
+            "适用资格类别",
+            "题目",
+            "选项A",
+            "选项B",
+            "标准答案",
+          ],
+        },
+      ]),
+    ).resolves.toEqual({
+      headerRowCount: 1,
+      questionTypeColumn: 0,
+      stemColumn: 2,
+      optionColumns: [3, 4, 5, 6],
+      answerColumn: 8,
+      analysisColumn: null,
+      lawSourceColumn: null,
+      ignoredColumns: [1],
+      answerEncoding: "NUMERIC_INDEX",
+    });
   });
 
-  it("兼容字符串数组选项并自动补齐选项标识", async () => {
+  it("只会向模型发送压缩后的 schema 预览而不是整份文件内容", async () => {
     applyTestEnv();
+    const lateRowMarker = "第十二行超长题干，不应该被完整发送给模型";
 
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(
+    global.fetch = vi.fn().mockImplementation(async (_input, init) => {
+      const requestBody = JSON.parse(String(init?.body ?? "{}"));
+      const userMessage = String(requestBody.messages?.[1]?.content ?? "");
+
+      expect(userMessage).toContain('"previewRows"');
+      expect(userMessage).toContain('"columns"');
+      expect(userMessage).not.toContain(lateRowMarker);
+
+      return new Response(
         JSON.stringify({
           choices: [
             {
               message: {
-                content: JSON.stringify([
-                  {
-                    type: "single",
-                    stem: "这是一道字符串选项格式的测试题目",
-                    options: ["A. 选项一", "B. 选项二", "C. 选项三", "D. 选项四"],
-                    correctAnswers: ["4"],
-                    analysis: "解析内容",
-                    lawSource: null,
-                    sourceLabel: null,
-                    sourceContent: null,
-                    sourceRowNumbers: ["3"],
-                  },
-                ]),
+                content: JSON.stringify({
+                  headerRowCount: 1,
+                  questionTypeColumn: 0,
+                  stemColumn: 2,
+                  optionColumns: [3, 4, 5, 6],
+                  answerColumn: 8,
+                  analysisColumn: null,
+                  lawSourceColumn: 9,
+                  ignoredColumns: [1],
+                  answerEncoding: "NUMERIC_INDEX",
+                }),
               },
             },
           ],
@@ -110,82 +121,40 @@ describe("question import ai service", () => {
             "Content-Type": "application/json",
           },
         },
-      ),
-    ) as typeof global.fetch;
+      );
+    }) as typeof global.fetch;
 
-    const { splitQuestionsWithAi } = await import(
-      "@/server/services/question-import-ai-service"
-    );
+    const rows = Array.from({ length: 12 }, (_, index) => {
+      const rowNumber = index + 1;
+      const stem =
+        rowNumber === 12
+          ? lateRowMarker
+          : `第 ${rowNumber} 行题干内容，用于测试 schema 预览压缩`;
 
-    await expect(
-      splitQuestionsWithAi([{ rowNumber: 3, content: "测试内容二" }], 10),
-    ).resolves.toMatchObject([
-      {
-        stem: "这是一道字符串选项格式的测试题目",
-        options: [
-          { label: "A", text: "选项一" },
-          { label: "B", text: "选项二" },
-          { label: "C", text: "选项三" },
-          { label: "D", text: "选项四" },
+      return {
+        rowNumber,
+        values: [
+          rowNumber === 1 ? "题型分类" : "单选题",
+          rowNumber === 1 ? "适用资格类别" : "A",
+          rowNumber === 1 ? "题目" : stem,
+          rowNumber === 1 ? "选项A" : "选项一",
+          rowNumber === 1 ? "选项B" : "选项二",
+          rowNumber === 1 ? "选项C" : "选项三",
+          rowNumber === 1 ? "选项D" : "选项四",
+          rowNumber === 1 ? "标准答案" : "3",
+          rowNumber === 1 ? "法条依据" : "《条例》第五条",
         ],
-        correctAnswers: ["D"],
-        sourceRowNumbers: [3],
-        sortOrder: 10,
-      },
-    ]);
-  });
+      };
+    });
 
-  it("兼容模型返回字符串排序号", async () => {
-    applyTestEnv();
-
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify([
-                  {
-                    type: "single",
-                    stem: "这是一道用于校验字符串排序号的测试题目",
-                    options: [
-                      { label: "A", text: "选项A" },
-                      { label: "B", text: "选项B" },
-                    ],
-                    correctAnswers: ["1"],
-                    analysis: null,
-                    lawSource: null,
-                    sortOrder: "12",
-                    sourceLabel: null,
-                    sourceContent: null,
-                    sourceRowNumbers: [7],
-                  },
-                ]),
-              },
-            },
-          ],
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      ),
-    ) as typeof global.fetch;
-
-    const { splitQuestionsWithAi } = await import(
+    const { detectQuestionImportSchemaWithAi } = await import(
       "@/server/services/question-import-ai-service"
     );
 
-    await expect(
-      splitQuestionsWithAi([{ rowNumber: 7, content: "测试内容三" }], 1),
-    ).resolves.toMatchObject([
-      {
-        stem: "这是一道用于校验字符串排序号的测试题目",
-        sortOrder: 12,
-        sourceRowNumbers: [7],
-      },
-    ]);
+    await expect(detectQuestionImportSchemaWithAi(rows)).resolves.toMatchObject({
+      headerRowCount: 1,
+      answerColumn: 8,
+      ignoredColumns: [1],
+    });
   });
 });
