@@ -171,7 +171,7 @@ export function QuestionImportModal({
 
     const timer = window.setTimeout(() => {
       void refreshBatch(batch.id);
-    }, 3000);
+    }, 1500);
 
     return () => {
       window.clearTimeout(timer);
@@ -566,6 +566,13 @@ export function QuestionImportModal({
                         当前批次没有可确认题目时，会在“来源行判定”中展示失败原因。
                       </div>
                     )}
+
+                    {batch?.status === "PENDING" ||
+                    batch?.status === "PROCESSING" ? (
+                      <div className="page-note">
+                        已识别完成的题目会实时追加到下方列表，无需等待整批处理结束再查看。
+                      </div>
+                    ) : null}
 
                     {batch?.drafts.length ? (
                       <>

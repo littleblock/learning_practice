@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("admin and mobile smoke flows", () => {
+  test("root route redirects learners to the mobile login page", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/m\/login$/, { timeout: 20_000 });
+  });
+
   test("admin login and management pages are reachable", async ({ page }) => {
     await page.goto("/admin/login");
 

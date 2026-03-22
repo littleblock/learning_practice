@@ -2,7 +2,7 @@
 
 import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { AdminLoginHero } from "@/features/admin/components/admin-login-hero";
 
@@ -12,15 +12,23 @@ export function AdminLoginForm() {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRouting, startRouting] = useTransition();
+  const isBusy = isSubmitting || isRouting;
+
+  useEffect(() => {
+    void router.prefetch("/admin/banks");
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSubmitting) {
+    if (isBusy) {
       return;
     }
 
     setErrorMessage("");
     setIsSubmitting(true);
+
+    let isAuthenticated = false;
 
     try {
       const response = await fetch("/api/admin/auth/login", {
@@ -43,21 +51,26 @@ export function AdminLoginForm() {
         return;
       }
 
-      router.replace("/admin/banks");
+      isAuthenticated = true;
+      startRouting(() => {
+        router.replace("/admin/banks");
+      });
     } catch {
       setErrorMessage("登录失败，请稍后重试");
     } finally {
-      setIsSubmitting(false);
+      if (!isAuthenticated) {
+        setIsSubmitting(false);
+      }
     }
   }
 
   return (
     <div className="admin-login-layout">
       <AdminLoginHero />
-      <section className="admin-panel" style={{ maxWidth: 460, padding: 28 }}>
+      <section className="admin-panel admin-login-panel">
         <div className="mobile-page-header">
           <h1>管理员登录</h1>
-          <p>请输入管理员账号和密码，进入后台维护题库、题目与法条资料。</p>
+          <p>请输入管理员账号和密码，登录后进入后台维护题库、题目与法条资料。</p>
         </div>
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
           <Input
@@ -65,27 +78,35 @@ export function AdminLoginForm() {
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
             autoComplete="username"
+            disabled={isBusy}
           />
           <Input.Password
             placeholder="请输入密码"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"
+            disabled={isBusy}
           />
           {errorMessage ? (
             <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
           ) : null}
-          {isSubmitting ? (
-            <div className="action-loading-notice">
-              <strong>正在验证管理员身份</strong>
-              <span>验证通过后会自动进入后台，请勿重复提交。</span>
+          {isBusy ? (
+            <div className="action-loading-notice" role="status" aria-live="polite">
+              <strong>
+                {isRouting ? "验证通过，正在进入后台" : "正在验证管理员身份"}
+              </strong>
+              <span>
+                {isRouting
+                  ? "页面即将自动跳转，请稍候。"
+                  : "验证通过后会直接跳转后台，请勿重复提交。"}
+              </span>
             </div>
           ) : null}
           <Button
             type="primary"
             htmlType="submit"
-            loading={isSubmitting}
-            disabled={!identifier || !password}
+            loading={isBusy}
+            disabled={!identifier || !password || isBusy}
           >
             登录后台
           </Button>

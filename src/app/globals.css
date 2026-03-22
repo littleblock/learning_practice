@@ -1128,13 +1128,15 @@ a {
 .admin-login-layout {
   min-height: calc(100vh - 48px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
-  gap: 24px;
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  gap: clamp(16px, 2vw, 22px);
   align-items: center;
 }
 
 .admin-login-hero {
-  padding: 36px;
+  padding: 28px 24px;
 }
 
 .admin-login-hero p {
@@ -1152,10 +1154,16 @@ a {
 
 .admin-login-hero span {
   display: block;
-  max-width: 520px;
+  max-width: 480px;
   margin-top: 16px;
   color: var(--text-secondary);
   line-height: 1.8;
+}
+
+.admin-login-panel {
+  max-width: 430px;
+  width: 100%;
+  padding: 28px;
 }
 
 .admin-modal-section {
