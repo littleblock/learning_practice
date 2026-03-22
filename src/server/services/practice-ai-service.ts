@@ -104,7 +104,7 @@ export async function generatePracticeQuestionAiExplanation(
     throw new Error("练习会话不存在");
   }
 
-  const currentItem = session.items[session.currentIndex] ?? null;
+  const currentItem = session.currentItem;
   if (!currentItem) {
     throw new Error("当前没有可解析的题目");
   }

@@ -65,7 +65,7 @@ function buildPracticeSessionView(
     Awaited<ReturnType<typeof getSessionWithCurrentQuestion>>
   >,
 ): PracticeSessionView {
-  const currentItem = session.items[session.currentIndex] ?? null;
+  const currentItem = session.currentItem;
   const latestAttempt = currentItem?.attempts[0] ?? null;
   const currentQuestion = currentItem
     ? {
@@ -266,7 +266,7 @@ export async function submitCurrentAnswer(
     throw new Error("练习会话不存在");
   }
 
-  const currentItem = session.items[session.currentIndex];
+  const currentItem = session.currentItem;
   if (!currentItem) {
     throw new Error("当前会话没有待答题目");
   }
@@ -384,7 +384,7 @@ export async function moveToNextQuestion(userId: string, sessionId: string) {
     throw new Error("练习会话不存在");
   }
 
-  const currentItem = session.items[session.currentIndex];
+  const currentItem = session.currentItem;
   if (!currentItem) {
     return buildPracticeSessionView(session);
   }
