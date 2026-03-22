@@ -11,9 +11,11 @@ test.describe("admin and mobile smoke flows", () => {
   test("admin login and management pages are reachable", async ({ page }) => {
     await page.goto("/admin/login");
 
-    await page.getByPlaceholder("管理员账号").fill("admin");
-    await page.getByPlaceholder("请输入密码").fill("123456");
-    await page.getByRole("button", { name: "登录后台" }).click();
+    await page.locator('input[autocomplete="username"]').fill("admin");
+    await page
+      .locator('input[autocomplete="current-password"]')
+      .fill("123456");
+    await page.locator('button[type="submit"]').click();
 
     await expect(page).toHaveURL(/\/admin\/banks$/, { timeout: 20_000 });
     await expect(page.getByRole("heading", { name: "题库管理" })).toBeVisible();
@@ -47,9 +49,11 @@ test.describe("admin and mobile smoke flows", () => {
   test("learner login and practice flow are reachable", async ({ page }) => {
     await page.goto("/m/login");
 
-    await page.getByPlaceholder("账号或手机号").fill("syy");
-    await page.getByPlaceholder("请输入密码").fill("study@123");
-    await page.getByRole("button", { name: "登录" }).click();
+    await page.locator('input[autocomplete="username"]').fill("syy");
+    await page
+      .locator('input[autocomplete="current-password"]')
+      .fill("study@123");
+    await page.locator('button[type="submit"]').click();
 
     await expect(page).toHaveURL(/\/m\/banks$/, { timeout: 20_000 });
     await expect(page.getByRole("heading", { name: "题库列表" })).toBeVisible();
