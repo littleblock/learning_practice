@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function LoginForm() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
@@ -20,7 +22,7 @@ export function LoginForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(withAppBasePath("/api/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

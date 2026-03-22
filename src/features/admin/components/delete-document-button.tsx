@@ -4,6 +4,8 @@ import { Button } from "antd";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function DeleteDocumentButton({ documentId }: { documentId: string }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -21,9 +23,12 @@ export function DeleteDocumentButton({ documentId }: { documentId: string }) {
     setIsDeleting(true);
 
     try {
-      const response = await fetch(`/api/admin/statutes/${documentId}`, {
+      const response = await fetch(
+        withAppBasePath(`/api/admin/statutes/${documentId}`),
+        {
         method: "DELETE",
-      });
+        },
+      );
       const payload = (await response.json().catch(() => ({}))) as {
         message?: string;
       };

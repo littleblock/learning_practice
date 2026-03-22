@@ -4,6 +4,8 @@ import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 interface BankFormProps {
   mode: "create" | "edit";
   bankId?: string;
@@ -50,7 +52,9 @@ export function BankForm({
 
     try {
       const response = await fetch(
-        mode === "create" ? "/api/admin/banks" : `/api/admin/banks/${bankId}`,
+        withAppBasePath(
+          mode === "create" ? "/api/admin/banks" : `/api/admin/banks/${bankId}`,
+        ),
         {
           method: mode === "create" ? "POST" : "PATCH",
           headers: {

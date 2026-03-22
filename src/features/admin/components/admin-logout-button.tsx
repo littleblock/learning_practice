@@ -5,6 +5,8 @@ import { Button } from "antd";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -17,7 +19,7 @@ export function AdminLogoutButton({ compact = false }: { compact?: boolean }) {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/logout", {
+      const response = await fetch(withAppBasePath("/api/auth/logout"), {
         method: "POST",
       });
 

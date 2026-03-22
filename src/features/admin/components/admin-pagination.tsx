@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 const pageSizeOptions = [10, 20, 50, 100];
 
 interface AdminPaginationProps {
@@ -31,7 +33,7 @@ function buildHref(
   searchParams.set(pageParam, String(targetPage));
   searchParams.set(pageSizeParam, String(pageSize));
 
-  return `${basePath}?${searchParams.toString()}`;
+  return withAppBasePath(`${basePath}?${searchParams.toString()}`);
 }
 
 function getPageWindow(currentPage: number, totalPages: number) {

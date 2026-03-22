@@ -2,7 +2,6 @@
 
 import { Button, Tabs } from "antd";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -12,6 +11,7 @@ import type {
   QuestionImportBatchSummary,
   QuestionListItem,
 } from "@/shared/types/domain";
+import { withAppBasePath } from "@/shared/utils/app-path";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
 import {
   formatDateTime,
@@ -153,7 +153,7 @@ export function QuestionManager({
     setDeleteError(null);
 
     try {
-      const response = await fetch(`/api/admin/questions/${questionId}`, {
+      const response = await fetch(withAppBasePath(`/api/admin/questions/${questionId}`), {
         method: "DELETE",
       });
 
@@ -389,12 +389,9 @@ export function QuestionManager({
                       </p>
                     </div>
                     <div className="inline-actions">
-                      <Link
-                        href="/api/admin/questions/import/template"
-                        prefetch={false}
-                      >
+                      <a href={withAppBasePath("/api/admin/questions/import/template")}>
                         下载标准模板
-                      </Link>
+                      </a>
                       <Button
                         onClick={refreshCurrentPage}
                         loading={isRefreshing}

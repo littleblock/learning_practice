@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { PracticeSessionView } from "@/shared/types/domain";
+import { withAppBasePath } from "@/shared/utils/app-path";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
 
 interface PracticePlayerProps {
@@ -39,7 +40,9 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     setSubmitting(true);
 
     try {
-      const response = await fetch(`/api/mobile/sessions/${view.id}/submit`, {
+      const response = await fetch(
+        withAppBasePath(`/api/mobile/sessions/${view.id}/submit`),
+        {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -47,7 +50,8 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
         body: JSON.stringify({
           selectedAnswers,
         }),
-      });
+        },
+      );
 
       const payload = (await response
         .json()
@@ -77,7 +81,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     setAdvancing(true);
 
     try {
-      const response = await fetch(`/api/mobile/sessions/${view.id}/next`, {
+      const response = await fetch(withAppBasePath(`/api/mobile/sessions/${view.id}/next`), {
         method: "POST",
       });
       const payload = (await response

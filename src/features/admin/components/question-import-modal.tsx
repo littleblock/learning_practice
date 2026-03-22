@@ -1,10 +1,10 @@
 "use client";
 
 import { Button, Modal, Pagination, Tabs } from "antd";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { QuestionImportBatchDetail } from "@/shared/types/domain";
+import { withAppBasePath } from "@/shared/utils/app-path";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
 import {
   formatDateTime,
@@ -110,7 +110,9 @@ export function QuestionImportModal({
       setIsRefreshingBatch(true);
 
       try {
-        const response = await fetch(`/api/admin/questions/import/${batchId}`);
+        const response = await fetch(
+          withAppBasePath(`/api/admin/questions/import/${batchId}`),
+        );
         const payload = (await response
           .json()
           .catch(() => ({}))) as QuestionImportBatchDetail & {
@@ -221,7 +223,7 @@ export function QuestionImportModal({
       formData.append("bankId", bankId);
       formData.append("file", file);
 
-      const response = await fetch("/api/admin/questions/import", {
+      const response = await fetch(withAppBasePath("/api/admin/questions/import"), {
         method: "POST",
         body: formData,
       });
@@ -265,7 +267,7 @@ export function QuestionImportModal({
 
     try {
       const response = await fetch(
-        `/api/admin/questions/import/${batch.id}/drafts/${draftId}`,
+        withAppBasePath(`/api/admin/questions/import/${batch.id}/drafts/${draftId}`),
         {
           method: "DELETE",
         },
@@ -313,7 +315,7 @@ export function QuestionImportModal({
 
     try {
       const response = await fetch(
-        `/api/admin/questions/import/${batch.id}/drafts/delete`,
+        withAppBasePath(`/api/admin/questions/import/${batch.id}/drafts/delete`),
         {
           method: "POST",
           headers: {
@@ -366,7 +368,7 @@ export function QuestionImportModal({
 
     try {
       const response = await fetch(
-        `/api/admin/questions/import/${batch.id}/confirm`,
+        withAppBasePath(`/api/admin/questions/import/${batch.id}/confirm`),
         {
           method: "POST",
         },
@@ -416,9 +418,9 @@ export function QuestionImportModal({
             识别。每一行都会记录是否能形成题目。
           </div>
           <div className="inline-actions">
-            <Link href="/api/admin/questions/import/template" prefetch={false}>
+            <a href={withAppBasePath("/api/admin/questions/import/template")}>
               下载标准模板
-            </Link>
+            </a>
             <input
               ref={fileInputRef}
               type="file"

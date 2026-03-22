@@ -1,5 +1,7 @@
 import { BankStatus, QuestionType } from "@prisma/client";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function BankFilters({
   keyword,
   status,
@@ -11,7 +13,7 @@ export function BankFilters({
 }) {
   return (
     <form
-      action="/admin/banks"
+      action={withAppBasePath("/admin/banks")}
       className="admin-filter-form admin-bank-filter-form"
     >
       <input type="hidden" name="page" value="1" />
@@ -50,7 +52,7 @@ export function QuestionFilters({
 }) {
   return (
     <form
-      action={`/admin/banks/${bankId}/questions`}
+      action={withAppBasePath(`/admin/banks/${bankId}/questions`)}
       className="admin-filter-form admin-question-filter-form"
     >
       <input type="hidden" name="page" value="1" />

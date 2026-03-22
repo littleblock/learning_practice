@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { QuestionListItem } from "@/shared/types/domain";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
+import { withAppBasePath } from "@/shared/utils/app-path";
 
 interface QuestionFormState {
   type: QuestionType;
@@ -169,7 +170,7 @@ export function QuestionEditorModal({
         : `/api/admin/questions?bankId=${bankId}`;
       const method = question ? "PATCH" : "POST";
 
-      const response = await fetch(endpoint, {
+      const response = await fetch(withAppBasePath(endpoint), {
         method,
         headers: {
           "Content-Type": "application/json",

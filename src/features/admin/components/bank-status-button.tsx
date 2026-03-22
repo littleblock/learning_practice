@@ -5,6 +5,8 @@ import { Button } from "antd";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function BankStatusButton({
   bankId,
   status,
@@ -38,7 +40,7 @@ export function BankStatusButton({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`/api/admin/banks/${bankId}`, {
+      const response = await fetch(withAppBasePath(`/api/admin/banks/${bankId}`), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

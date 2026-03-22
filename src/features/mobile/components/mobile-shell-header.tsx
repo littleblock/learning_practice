@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { stripAppBasePath, withAppBasePath } from "@/shared/utils/app-path";
+
 const navigationItems = [
   {
     href: "/m/banks",
@@ -22,8 +24,9 @@ export function MobileShellHeader() {
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const routePath = stripAppBasePath(pathname);
 
-  if (!pathname || pathname === "/m/login") {
+  if (!routePath || routePath === "/m/login") {
     return null;
   }
 
@@ -36,7 +39,7 @@ export function MobileShellHeader() {
     setIsLoggingOut(true);
 
     try {
-      const response = await fetch("/api/auth/logout", {
+      const response = await fetch(withAppBasePath("/api/auth/logout"), {
         method: "POST",
       });
 
@@ -58,9 +61,9 @@ export function MobileShellHeader() {
       <nav className="mobile-shell-actions">
         {navigationItems.map((item) => {
           const isActive =
-            pathname === item.href ||
+            routePath === item.href ||
             item.matchPrefixes.some((prefix) =>
-              pathname.startsWith(`${prefix}/`),
+              routePath.startsWith(`${prefix}/`),
             );
 
           return (

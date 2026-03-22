@@ -4,6 +4,8 @@ import { Button, Input } from "antd";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 export function StatuteUploadForm({ bankId }: { bankId: string }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -36,7 +38,7 @@ export function StatuteUploadForm({ bankId }: { bankId: string }) {
     setIsUploading(true);
 
     try {
-      const response = await fetch("/api/admin/statutes/upload", {
+      const response = await fetch(withAppBasePath("/api/admin/statutes/upload"), {
         method: "POST",
         body: formData,
       });

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { AdminLoginHero } from "@/features/admin/components/admin-login-hero";
+import { withAppBasePath } from "@/shared/utils/app-path";
 
 export function AdminLoginForm() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export function AdminLoginForm() {
     let isAuthenticated = false;
 
     try {
-      const response = await fetch("/api/admin/auth/login", {
+      const response = await fetch(withAppBasePath("/api/admin/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

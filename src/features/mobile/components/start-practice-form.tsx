@@ -4,6 +4,8 @@ import { PracticeMode, PracticeSourceType } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { withAppBasePath } from "@/shared/utils/app-path";
+
 const options = [
   { label: "顺序练习", value: PracticeMode.SEQUENTIAL },
   { label: "倒序练习", value: PracticeMode.REVERSE },
@@ -59,7 +61,7 @@ export function StartPracticeForm({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`/api/mobile/banks/${bankId}/sessions`, {
+      const response = await fetch(withAppBasePath(`/api/mobile/banks/${bankId}/sessions`), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
