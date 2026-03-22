@@ -1,24 +1,18 @@
 "use client";
 
 import { Button, Input } from "antd";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState } from "react";
 
 import { AdminLoginHero } from "@/features/admin/components/admin-login-hero";
 import { withAppBasePath } from "@/shared/utils/app-path";
 
 export function AdminLoginForm() {
-  const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRouting, startRouting] = useTransition();
-  const isBusy = isSubmitting || isRouting;
-
-  useEffect(() => {
-    void router.prefetch("/admin/banks");
-  }, [router]);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const isBusy = isSubmitting || isRedirecting;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,8 +22,6 @@ export function AdminLoginForm() {
 
     setErrorMessage("");
     setIsSubmitting(true);
-
-    let isAuthenticated = false;
 
     try {
       const response = await fetch(withAppBasePath("/api/admin/auth/login"), {
@@ -52,14 +44,13 @@ export function AdminLoginForm() {
         return;
       }
 
-      isAuthenticated = true;
-      startRouting(() => {
-        router.replace("/admin/banks");
-      });
+      setIsRedirecting(true);
+      window.location.replace(withAppBasePath("/admin/banks"));
+      return;
     } catch {
       setErrorMessage("登录失败，请稍后重试");
     } finally {
-      if (!isAuthenticated) {
+      if (!isRedirecting) {
         setIsSubmitting(false);
       }
     }
@@ -71,7 +62,9 @@ export function AdminLoginForm() {
       <section className="admin-panel admin-login-panel">
         <div className="mobile-page-header">
           <h1>管理员登录</h1>
-          <p>请输入管理员账号和密码，登录后进入后台维护题库、题目与法条资料。</p>
+          <p>
+            请输入管理员账号和密码，登录后进入后台维护题库、题目与法条资料。
+          </p>
         </div>
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
           <Input
@@ -92,14 +85,20 @@ export function AdminLoginForm() {
             <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
           ) : null}
           {isBusy ? (
-            <div className="action-loading-notice" role="status" aria-live="polite">
+            <div
+              className="action-loading-notice"
+              role="status"
+              aria-live="polite"
+            >
               <strong>
-                {isRouting ? "验证通过，正在进入后台" : "正在验证管理员身份"}
+                {isRedirecting
+                  ? "验证通过，正在进入后台"
+                  : "正在验证管理员身份"}
               </strong>
               <span>
-                {isRouting
+                {isRedirecting
                   ? "页面即将自动跳转，请稍候。"
-                  : "验证通过后会直接跳转后台，请勿重复提交。"}
+                  : "验证通过后会直接进入后台，请勿重复提交。"}
               </span>
             </div>
           ) : null}
