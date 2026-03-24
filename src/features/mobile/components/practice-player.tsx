@@ -9,7 +9,10 @@ import type {
   PracticeSessionView,
 } from "@/shared/types/domain";
 import { withAppBasePath } from "@/shared/utils/app-path";
-import { getQuestionTypeLabel, normalizeAnswerValues } from "@/shared/utils/answers";
+import {
+  getQuestionTypeLabel,
+  normalizeAnswerValues,
+} from "@/shared/utils/answers";
 
 interface PracticePlayerProps {
   initialView: PracticeSessionView;
@@ -83,11 +86,12 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     !retreating &&
     !submitting &&
     !explainingAi;
+
   const localBusyCopy = useMemo(() => {
     if (retreating) {
       return {
         title: "正在返回上一题",
-        description: "当前题目索引正在回退，请稍候。",
+        description: "系统正在恢复上一题内容，请稍候。",
       };
     }
 
@@ -99,7 +103,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
           }
         : {
             title: "正在切换下一题",
-            description: "题目内容很快就会刷新，请稍候。",
+            description: "下一题内容很快就会显示，请稍候。",
           };
     }
 
@@ -111,7 +115,14 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     }
 
     return null;
-  }, [advancing, hasSubmitted, retreating, submitting, view.currentIndex, view.totalCount]);
+  }, [
+    advancing,
+    hasSubmitted,
+    retreating,
+    submitting,
+    view.currentIndex,
+    view.totalCount,
+  ]);
 
   function setUnsavedGuardMessage() {
     setFeedbackMessage("当前题目有未保存修改，请先提交后再切换题目。");
@@ -287,7 +298,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
       <section className="mobile-panel" style={{ padding: 24 }}>
         <div className="mobile-page-header">
           <h1>练习已完成</h1>
-          <p>当前会话里已经没有待作答题目，可以返回题库继续新的练习。</p>
+          <p>当前会话已经没有待作答题目，可以返回题库列表继续新的练习。</p>
         </div>
         <div className="inline-actions">
           <button
@@ -370,7 +381,9 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
 
                       setSelectedAnswers([item.label]);
                     }}
-                    disabled={!isInteractive || submitting || advancing || retreating}
+                    disabled={
+                      !isInteractive || submitting || advancing || retreating
+                    }
                   >
                     {item.label}. {item.text}
                   </button>
@@ -381,7 +394,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
             {!isInteractive ? (
               <div className="action-loading-notice">
                 <strong>正在准备答题页面</strong>
-                <span>按钮初始化完成后即可开始作答，请稍候。</span>
+                <span>页面交互初始化完成后即可开始作答，请稍候。</span>
               </div>
             ) : null}
 
@@ -430,7 +443,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               </div>
               <div className="mobile-practice-result-item">
                 <strong>匹配法条片段</strong>
-                <span>{currentQuestion.matchedExcerpt || "暂未匹配到法条内容"}</span>
+                <span>{currentQuestion.matchedExcerpt || "暂无匹配内容"}</span>
               </div>
             </div>
 
@@ -443,7 +456,9 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                     <span>系统会基于当前题目和作答结果生成更易懂的说明。</span>
                   </div>
                 ) : aiExplanationError ? (
-                  <div className="mobile-feedback is-error">{aiExplanationError}</div>
+                  <div className="mobile-feedback is-error">
+                    {aiExplanationError}
+                  </div>
                 ) : aiExplanation ? (
                   <>
                     <p>{aiExplanation.content}</p>
@@ -474,15 +489,6 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
 
       <section className="mobile-panel mobile-practice-action-bar">
         <div className="mobile-practice-action-buttons">
-          <button
-            type="button"
-            className="mobile-button"
-            onClick={previousQuestion}
-            disabled={!canGoPrevious}
-          >
-            上一题
-          </button>
-
           {!hasSubmitted || hasUnsavedChanges ? (
             <button
               type="button"
@@ -513,7 +519,11 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               className="mobile-button is-primary is-emphasis"
               onClick={nextQuestion}
               disabled={
-                advancing || retreating || submitting || explainingAi || !isInteractive
+                advancing ||
+                retreating ||
+                submitting ||
+                explainingAi ||
+                !isInteractive
               }
               aria-busy={advancing || !isInteractive}
             >
@@ -526,6 +536,15 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                     : "下一题"}
             </button>
           )}
+
+          <button
+            type="button"
+            className="mobile-button"
+            onClick={previousQuestion}
+            disabled={!canGoPrevious}
+          >
+            上一题
+          </button>
 
           {hasSubmitted ? (
             <button

@@ -92,6 +92,7 @@ async function upsertBankWithQuestions(input: {
 
 async function main() {
   const commonPasswordHash = await bcrypt.hash("123456", 10);
+  const syyPasswordHash = await bcrypt.hash("study@123", 10);
 
   await upsertUser({
     loginName: "admin",
@@ -100,8 +101,14 @@ async function main() {
     role: UserRole.ADMIN,
   });
 
+  await upsertUser({
+    loginName: "syy",
+    displayName: "syy",
+    passwordHash: syyPasswordHash,
+    role: UserRole.LEARNER,
+  });
+
   for (const learner of [
-    { loginName: "syy", displayName: "syy" },
     { loginName: "test01", displayName: "test01" },
     { loginName: "test02", displayName: "test02" },
   ]) {
