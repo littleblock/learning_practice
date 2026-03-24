@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { QuestionType } from "@prisma/client";
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +9,7 @@ import type {
   PracticeSessionView,
 } from "@/shared/types/domain";
 import { withAppBasePath } from "@/shared/utils/app-path";
-import { getQuestionTypeLabel } from "@/shared/utils/answers";
+import { getQuestionTypeLabel, normalizeAnswerValues } from "@/shared/utils/answers";
 
 interface PracticePlayerProps {
   initialView: PracticeSessionView;
@@ -17,6 +17,17 @@ interface PracticePlayerProps {
 
 function formatAnswerText(values: string[]) {
   return values.length > 0 ? values.join("、") : "未作答";
+}
+
+function isSameAnswerSet(left: string[], right: string[]) {
+  const normalizedLeft = normalizeAnswerValues(left);
+  const normalizedRight = normalizeAnswerValues(right);
+
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
 }
 
 export function PracticePlayer({ initialView }: PracticePlayerProps) {
@@ -29,6 +40,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
+  const [retreating, setRetreating] = useState(false);
   const [explainingAi, setExplainingAi] = useState(false);
   const [aiExplanation, setAiExplanation] =
     useState<PracticeAiExplanationView | null>(null);
@@ -52,25 +64,58 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
   }, [view.currentQuestion?.questionId]);
 
   const currentQuestion = view.currentQuestion;
+  const savedAnswers = currentQuestion?.selectedAnswers ?? [];
   const multiple = currentQuestion?.type === QuestionType.MULTIPLE;
   const hasSubmitted = currentQuestion?.isCorrect !== null;
+  const hasUnsavedChanges = currentQuestion
+    ? !isSameAnswerSet(selectedAnswers, savedAnswers)
+    : false;
+  const canGoPrevious =
+    isInteractive &&
+    !submitting &&
+    !advancing &&
+    !retreating &&
+    view.currentIndex > 0;
+  const canRequestAi =
+    hasSubmitted &&
+    !hasUnsavedChanges &&
+    !advancing &&
+    !retreating &&
+    !submitting &&
+    !explainingAi;
   const localBusyCopy = useMemo(() => {
-    if (advancing) {
+    if (retreating) {
       return {
-        title: "正在切换下一题",
-        description: "题目内容很快就会刷新，请稍候。",
+        title: "正在返回上一题",
+        description: "当前题目索引正在回退，请稍候。",
       };
+    }
+
+    if (advancing) {
+      return view.currentIndex >= view.totalCount - 1
+        ? {
+            title: "正在完成练习",
+            description: "系统正在收尾当前会话，请稍候。",
+          }
+        : {
+            title: "正在切换下一题",
+            description: "题目内容很快就会刷新，请稍候。",
+          };
     }
 
     if (submitting) {
       return {
-        title: "正在提交答案",
+        title: hasSubmitted ? "正在更新答案" : "正在提交答案",
         description: "系统正在判定当前题目的作答结果。",
       };
     }
 
     return null;
-  }, [advancing, submitting]);
+  }, [advancing, hasSubmitted, retreating, submitting, view.currentIndex, view.totalCount]);
+
+  function setUnsavedGuardMessage() {
+    setFeedbackMessage("当前题目有未保存修改，请先提交后再切换题目。");
+  }
 
   async function submitAnswer() {
     if (!currentQuestion || submitting || selectedAnswers.length === 0) {
@@ -118,6 +163,11 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
       return;
     }
 
+    if (hasUnsavedChanges) {
+      setUnsavedGuardMessage();
+      return;
+    }
+
     setFeedbackMessage("");
     setAdvancing(true);
 
@@ -147,8 +197,52 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
     }
   }
 
+  async function previousQuestion() {
+    if (!canGoPrevious) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setUnsavedGuardMessage();
+      return;
+    }
+
+    setFeedbackMessage("");
+    setRetreating(true);
+
+    try {
+      const response = await fetch(
+        withAppBasePath(`/api/mobile/sessions/${view.id}/previous`),
+        {
+          method: "POST",
+        },
+      );
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as PracticeSessionView & {
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setFeedbackMessage(payload.message ?? "返回上一题失败，请稍后重试。");
+        return;
+      }
+
+      setView(payload);
+    } catch {
+      setFeedbackMessage("返回上一题失败，请稍后重试。");
+    } finally {
+      setRetreating(false);
+    }
+  }
+
   async function requestAiExplanation() {
     if (!currentQuestion || !hasSubmitted || explainingAi) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setFeedbackMessage("请先保存当前答案修改，再查看 AI 解析。");
       return;
     }
 
@@ -256,7 +350,12 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                         : "mobile-choice-button"
                     }
                     onClick={() => {
-                      if (hasSubmitted || !isInteractive) {
+                      if (
+                        !isInteractive ||
+                        submitting ||
+                        advancing ||
+                        retreating
+                      ) {
                         return;
                       }
 
@@ -271,7 +370,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
 
                       setSelectedAnswers([item.label]);
                     }}
-                    disabled={hasSubmitted || !isInteractive || submitting || advancing}
+                    disabled={!isInteractive || submitting || advancing || retreating}
                   >
                     {item.label}. {item.text}
                   </button>
@@ -283,6 +382,12 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               <div className="action-loading-notice">
                 <strong>正在准备答题页面</strong>
                 <span>按钮初始化完成后即可开始作答，请稍候。</span>
+              </div>
+            ) : null}
+
+            {hasSubmitted && hasUnsavedChanges ? (
+              <div className="mobile-feedback mobile-feedback-warning">
+                当前选择尚未保存，提交更新后会重新计算本题结果和错题状态。
               </div>
             ) : null}
 
@@ -308,7 +413,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                 </span>
               </div>
               <div className="mobile-practice-result-item">
-                <strong>你的答案</strong>
+                <strong>已保存答案</strong>
                 <span>{formatAnswerText(currentQuestion.selectedAnswers)}</span>
               </div>
               <div className="mobile-practice-result-item">
@@ -369,15 +474,25 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
 
       <section className="mobile-panel mobile-practice-action-bar">
         <div className="mobile-practice-action-buttons">
-          {!hasSubmitted ? (
+          <button
+            type="button"
+            className="mobile-button"
+            onClick={previousQuestion}
+            disabled={!canGoPrevious}
+          >
+            上一题
+          </button>
+
+          {!hasSubmitted || hasUnsavedChanges ? (
             <button
               type="button"
-              className="mobile-button is-primary"
+              className="mobile-button is-primary is-emphasis"
               disabled={
                 selectedAnswers.length === 0 ||
                 !isInteractive ||
                 submitting ||
-                advancing
+                advancing ||
+                retreating
               }
               aria-busy={!isInteractive || submitting}
               onClick={submitAnswer}
@@ -385,22 +500,30 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               {!isInteractive
                 ? "页面准备中..."
                 : submitting
-                  ? "提交中..."
-                  : "提交答案"}
+                  ? hasSubmitted
+                    ? "更新中..."
+                    : "提交中..."
+                  : hasSubmitted
+                    ? "更新答案"
+                    : "提交答案"}
             </button>
           ) : (
             <button
               type="button"
-              className="mobile-button is-primary"
+              className="mobile-button is-primary is-emphasis"
               onClick={nextQuestion}
-              disabled={advancing || submitting || explainingAi || !isInteractive}
+              disabled={
+                advancing || retreating || submitting || explainingAi || !isInteractive
+              }
               aria-busy={advancing || !isInteractive}
             >
               {!isInteractive
                 ? "页面准备中..."
                 : advancing
                   ? "加载中..."
-                  : "下一题"}
+                  : view.currentIndex >= view.totalCount - 1
+                    ? "完成练习"
+                    : "下一题"}
             </button>
           )}
 
@@ -409,7 +532,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
               type="button"
               className="mobile-button"
               onClick={requestAiExplanation}
-              disabled={advancing || submitting || explainingAi}
+              disabled={!canRequestAi}
               aria-busy={explainingAi}
             >
               {explainingAi ? "解析中..." : "AI解析"}
@@ -425,7 +548,7 @@ export function PracticePlayer({ initialView }: PracticePlayerProps) {
                 description: "页面即将切换到题库列表，请稍候。",
               })
             }
-            disabled={submitting || advancing}
+            disabled={submitting || advancing || retreating}
           >
             返回题库列表
           </button>

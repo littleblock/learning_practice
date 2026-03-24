@@ -45,6 +45,7 @@ import {
 import {
   readStoredFile,
   saveUploadedFile,
+  deleteStoredFile,
 } from "@/server/storage/file-storage";
 
 export interface SheetRow {
@@ -71,6 +72,11 @@ interface ParsedWorkbookResult {
 
 const questionCreateChunkSize = 200;
 const standardTemplateChunkCount = 1;
+const cancellableBatchStatuses: QuestionImportBatchStatus[] = [
+  QuestionImportBatchStatus.PENDING,
+  QuestionImportBatchStatus.PROCESSING,
+  QuestionImportBatchStatus.READY,
+];
 
 interface QuestionImportBatchDetailOptions {
   draftPage?: number;
@@ -78,6 +84,38 @@ interface QuestionImportBatchDetailOptions {
   draftKeyword?: string;
   sourceRowPage?: number;
   sourceRowPageSize?: number;
+}
+
+export class ImportBatchCancelledError extends Error {
+  constructor(message = "导题任务已终止") {
+    super(message);
+    this.name = "ImportBatchCancelledError";
+  }
+}
+
+export function isImportBatchCancelledError(
+  error: unknown,
+): error is ImportBatchCancelledError {
+  return error instanceof ImportBatchCancelledError;
+}
+
+async function updateBatchWhileActive(
+  batchId: string,
+  data: Prisma.QuestionImportBatchUpdateInput,
+) {
+  const updated = await prisma.questionImportBatch.updateMany({
+    where: {
+      id: batchId,
+      status: {
+        not: QuestionImportBatchStatus.CANCELLED,
+      },
+    },
+    data,
+  });
+
+  if (updated.count === 0) {
+    throw new ImportBatchCancelledError();
+  }
 }
 
 async function initializeBatchProgress(
@@ -90,10 +128,7 @@ async function initializeBatchProgress(
     currentConcurrency: number;
   },
 ) {
-  await prisma.questionImportBatch.update({
-    where: { id: batchId },
-    data: input,
-  });
+  await updateBatchWhileActive(batchId, input);
 }
 
 async function syncBatchProcessingProgress(
@@ -104,25 +139,22 @@ async function syncBatchProcessingProgress(
     currentConcurrency: number;
   },
 ) {
-  await prisma.questionImportBatch.update({
-    where: { id: batchId },
-    data: {
-      ...(input.processedSourceRowsIncrement
-        ? {
-            processedSourceRows: {
-              increment: input.processedSourceRowsIncrement,
-            },
-          }
-        : {}),
-      ...(input.processedChunksIncrement
-        ? {
-            processedChunks: {
-              increment: input.processedChunksIncrement,
-            },
-          }
-        : {}),
-      currentConcurrency: input.currentConcurrency,
-    },
+  await updateBatchWhileActive(batchId, {
+    ...(input.processedSourceRowsIncrement
+      ? {
+          processedSourceRows: {
+            increment: input.processedSourceRowsIncrement,
+          },
+        }
+      : {}),
+    ...(input.processedChunksIncrement
+      ? {
+          processedChunks: {
+            increment: input.processedChunksIncrement,
+          },
+        }
+      : {}),
+    currentConcurrency: input.currentConcurrency,
   });
 }
 
@@ -324,6 +356,7 @@ function mapBatchSummary(item: {
   createdAt: Date;
   parsedAt: Date | null;
   confirmedAt: Date | null;
+  cancelledAt: Date | null;
 }): QuestionImportBatchSummary {
   return {
     id: item.id,
@@ -343,6 +376,7 @@ function mapBatchSummary(item: {
     createdAt: item.createdAt.toISOString(),
     parsedAt: item.parsedAt?.toISOString() ?? null,
     confirmedAt: item.confirmedAt?.toISOString() ?? null,
+    cancelledAt: item.cancelledAt?.toISOString() ?? null,
   };
 }
 
@@ -371,6 +405,7 @@ async function buildQuestionImportBatchDetail(
       createdAt: true,
       parsedAt: true,
       confirmedAt: true,
+      cancelledAt: true,
     },
   });
 
@@ -502,6 +537,7 @@ async function buildQuestionImportBatchDetail(
     createdAt: batch.createdAt.toISOString(),
     parsedAt: batch.parsedAt?.toISOString() ?? null,
     confirmedAt: batch.confirmedAt?.toISOString() ?? null,
+    cancelledAt: batch.cancelledAt?.toISOString() ?? null,
     drafts: drafts.map(mapDraftRecord),
     sourceRowTotal,
     sourceRows: sourceRows.map(mapSourceRowRecord),
@@ -527,6 +563,51 @@ async function syncBatchDraftCount(
   });
 }
 
+async function getQuestionImportBatchState(batchId: string) {
+  return prisma.questionImportBatch.findUnique({
+    where: { id: batchId },
+    select: {
+      id: true,
+      bankId: true,
+      status: true,
+      storagePath: true,
+    },
+  });
+}
+
+async function assertQuestionImportBatchNotCancelled(batchId: string) {
+  const batch = await getQuestionImportBatchState(batchId);
+
+  if (!batch) {
+    throw new Error("导题批次不存在");
+  }
+
+  if (batch.status === QuestionImportBatchStatus.CANCELLED) {
+    throw new ImportBatchCancelledError();
+  }
+
+  return batch;
+}
+
+async function cancelImportQuestionJobsByBatchId(
+  batchId: string,
+  reason: string,
+) {
+  await prisma.$executeRaw`
+    UPDATE "Job"
+    SET
+      "status" = 'CANCELLED',
+      "finishedAt" = NOW(),
+      "lockedAt" = NULL,
+      "lockedBy" = NULL,
+      "lastError" = ${reason.slice(0, 4000)},
+      "updatedAt" = NOW()
+    WHERE "type" = 'IMPORT_QUESTIONS'
+      AND "status" IN ('PENDING', 'PROCESSING')
+      AND "payload" ->> 'batchId' = ${batchId}
+  `;
+}
+
 function assignSequentialSortOrders(
   drafts: QuestionImportDraftInput[],
   startingSortOrder: number,
@@ -545,6 +626,21 @@ async function appendBatchChunkParseResult(
   },
 ) {
   await prisma.$transaction(async (tx) => {
+    const batch = await tx.questionImportBatch.findUnique({
+      where: { id: batchId },
+      select: {
+        status: true,
+      },
+    });
+
+    if (!batch) {
+      throw new Error("导题批次不存在");
+    }
+
+    if (batch.status === QuestionImportBatchStatus.CANCELLED) {
+      throw new ImportBatchCancelledError();
+    }
+
     if (input.drafts.length > 0) {
       await tx.questionImportDraft.createMany({
         data: input.drafts.map((draft) => ({
@@ -847,6 +943,7 @@ async function parseRowsWithAi(
 
   const schemaDetectStartedAt = Date.now();
   const detectedSchema = await detectStructuredQuestionImportSchema(rows);
+  await assertQuestionImportBatchNotCancelled(batchId);
   const schemaDetectMs = Date.now() - schemaDetectStartedAt;
   const parseStartedAt = Date.now();
   const parsed = parseRowsWithStructuredSchema(
@@ -867,12 +964,9 @@ async function parseRowsWithAi(
   );
 
   const persistStartedAt = Date.now();
-  await prisma.questionImportBatch.update({
-    where: { id: batchId },
-    data: {
-      schemaMode: detectedSchema.mode,
-      schemaSummary: serializeSchemaSummary(detectedSchema.summary),
-    },
+  await updateBatchWhileActive(batchId, {
+    schemaMode: detectedSchema.mode,
+    schemaSummary: serializeSchemaSummary(detectedSchema.summary),
   });
 
   await appendBatchChunkParseResult(batchId, {
@@ -977,6 +1071,8 @@ async function parseWorkbookToDrafts(
     });
   }
 
+  await assertQuestionImportBatchNotCancelled(batchId);
+
   return {
     sourceSheetName: firstSheetName,
     ...parsed,
@@ -1058,6 +1154,7 @@ export async function getQuestionImportBatchSnapshot(batchId: string) {
       createdAt: true,
       parsedAt: true,
       confirmedAt: true,
+      cancelledAt: true,
     },
   });
 
@@ -1066,6 +1163,67 @@ export async function getQuestionImportBatchSnapshot(batchId: string) {
   }
 
   return mapBatchSummary(batch);
+}
+
+export async function cancelQuestionImportBatch(batchId: string) {
+  const reason = "导题批次已终止";
+  const batch = await prisma.questionImportBatch.findUnique({
+    where: { id: batchId },
+    select: {
+      id: true,
+      status: true,
+      storagePath: true,
+    },
+  });
+
+  if (!batch) {
+    throw new Error("导题批次不存在");
+  }
+
+  if (!cancellableBatchStatuses.includes(batch.status)) {
+    throw new Error("当前批次不允许终止");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.questionImportBatch.updateMany({
+      where: {
+        id: batchId,
+        status: {
+          in: [...cancellableBatchStatuses],
+        },
+      },
+      data: {
+        status: QuestionImportBatchStatus.CANCELLED,
+        cancelledAt: new Date(),
+        currentConcurrency: 0,
+        draftCount: 0,
+        lastError: reason,
+      },
+    });
+
+    if (updated.count === 0) {
+      throw new Error("当前批次不允许终止");
+    }
+
+    await tx.questionImportDraft.deleteMany({
+      where: {
+        batchId,
+      },
+    });
+
+    await tx.questionImportSourceRow.deleteMany({
+      where: {
+        batchId,
+      },
+    });
+  });
+
+  await Promise.all([
+    cancelImportQuestionJobsByBatchId(batchId, reason),
+    deleteStoredFile(batch.storagePath),
+  ]);
+
+  return buildQuestionImportBatchDetail(batchId);
 }
 
 export async function listQuestionImportDraftsAfter(
@@ -1177,6 +1335,7 @@ export async function listQuestionImportBatchesForAdmin(
       createdAt: true,
       parsedAt: true,
       confirmedAt: true,
+      cancelledAt: true,
     },
   });
 
@@ -1497,7 +1656,10 @@ export async function markQuestionImportBatchFailed(
     where: {
       id: batchId,
       status: {
-        not: QuestionImportBatchStatus.CONFIRMED,
+        notIn: [
+          QuestionImportBatchStatus.CONFIRMED,
+          QuestionImportBatchStatus.CANCELLED,
+        ],
       },
     },
     data: {
@@ -1510,20 +1672,42 @@ export async function markQuestionImportBatchFailed(
 }
 
 export async function processQuestionImportBatch(batchId: string) {
-  const batch = await prisma.questionImportBatch.findUnique({
-    where: { id: batchId },
-    select: {
-      id: true,
-      bankId: true,
-      storagePath: true,
-    },
-  });
-
-  if (!batch) {
-    return;
-  }
+  const batch = await assertQuestionImportBatchNotCancelled(batchId);
 
   await prisma.$transaction(async (tx) => {
+    const resetBatch = await tx.questionImportBatch.updateMany({
+      where: {
+        id: batchId,
+        status: {
+          notIn: [
+            QuestionImportBatchStatus.CONFIRMED,
+            QuestionImportBatchStatus.CANCELLED,
+          ],
+        },
+      },
+      data: {
+        status: QuestionImportBatchStatus.PROCESSING,
+        lastError: null,
+        parsedAt: null,
+        confirmedAt: null,
+        cancelledAt: null,
+        templateType: null,
+        sourceSheetName: null,
+        schemaMode: null,
+        schemaSummary: Prisma.JsonNull,
+        draftCount: 0,
+        totalSourceRows: 0,
+        processedSourceRows: 0,
+        totalChunks: 0,
+        processedChunks: 0,
+        currentConcurrency: 0,
+      },
+    });
+
+    if (resetBatch.count === 0) {
+      throw new ImportBatchCancelledError();
+    }
+
     await tx.questionImportDraft.deleteMany({
       where: {
         batchId,
@@ -1535,33 +1719,30 @@ export async function processQuestionImportBatch(batchId: string) {
         batchId,
       },
     });
-
-      await tx.questionImportBatch.update({
-        where: { id: batchId },
-        data: {
-          status: QuestionImportBatchStatus.PROCESSING,
-          lastError: null,
-          parsedAt: null,
-          confirmedAt: null,
-          templateType: null,
-          sourceSheetName: null,
-          schemaMode: null,
-          schemaSummary: Prisma.JsonNull,
-          draftCount: 0,
-          totalSourceRows: 0,
-          processedSourceRows: 0,
-          totalChunks: 0,
-        processedChunks: 0,
-        currentConcurrency: 0,
-      },
-    });
   });
 
   try {
+    await assertQuestionImportBatchNotCancelled(batchId);
     const buffer = await readStoredFile(batch.storagePath);
+    await assertQuestionImportBatchNotCancelled(batchId);
     const parsed = await parseWorkbookToDrafts(batch.bankId, batchId, buffer);
 
     await prisma.$transaction(async (tx) => {
+      const activeBatch = await tx.questionImportBatch.findUnique({
+        where: { id: batchId },
+        select: {
+          status: true,
+        },
+      });
+
+      if (!activeBatch) {
+        throw new Error("导题批次不存在");
+      }
+
+      if (activeBatch.status === QuestionImportBatchStatus.CANCELLED) {
+        throw new ImportBatchCancelledError();
+      }
+
       if (!parsed.persistedDuringParsing && parsed.drafts.length > 0) {
         await tx.questionImportDraft.createMany({
           data: parsed.drafts.map((draft) => ({
@@ -1594,8 +1775,13 @@ export async function processQuestionImportBatch(batchId: string) {
         });
       }
 
-      await tx.questionImportBatch.update({
-        where: { id: batchId },
+      const finalized = await tx.questionImportBatch.updateMany({
+        where: {
+          id: batchId,
+          status: {
+            not: QuestionImportBatchStatus.CANCELLED,
+          },
+        },
         data: {
           sourceSheetName: parsed.sourceSheetName,
           templateType: parsed.templateType,
@@ -1614,8 +1800,16 @@ export async function processQuestionImportBatch(batchId: string) {
           currentConcurrency: 0,
         },
       });
+
+      if (finalized.count === 0) {
+        throw new ImportBatchCancelledError();
+      }
     });
   } catch (error) {
+    if (isImportBatchCancelledError(error)) {
+      throw error;
+    }
+
     await markQuestionImportBatchFailed(
       batchId,
       error instanceof Error ? error.message : "导题解析失败",

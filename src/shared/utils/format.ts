@@ -67,6 +67,7 @@ const BATCH_STATUS_LABELS: Record<string, string> = {
   PROCESSING: "解析中",
   READY: "待确认",
   CONFIRMED: "已导入",
+  CANCELLED: "已终止",
   FAILED: "解析失败",
 };
 

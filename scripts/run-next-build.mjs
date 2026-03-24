@@ -1,7 +1,5 @@
 import { execSync, spawn } from "node:child_process";
 
-import { printAppUrls } from "./app-url-utils.mjs";
-
 function ensureUtf8Console() {
   if (process.platform !== "win32") {
     return;
@@ -13,27 +11,32 @@ function ensureUtf8Console() {
       shell: "cmd.exe",
     });
   } catch {
-    // 忽略控制台无法切换编码的情况。
+    // 本地终端不支持切换编码时，继续沿用当前控制台配置。
   }
 }
 
 ensureUtf8Console();
-printAppUrls();
 
 const packageManagerExecPath = process.env.npm_execpath;
 
 if (!packageManagerExecPath) {
-  throw new Error("Package manager entrypoint not found; cannot start Next dev.");
+  throw new Error("Package manager entrypoint not found; cannot start Next build.");
 }
 
-const child = spawn(process.execPath, [packageManagerExecPath, "exec", "next", "dev"], {
-  cwd: process.cwd(),
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    NEXT_DIST_DIR: ".next-dev",
+const child = spawn(
+  process.execPath,
+  [packageManagerExecPath, "exec", "next", "build"],
+  {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      NEXT_BUILD_CPUS: process.env.NEXT_BUILD_CPUS || "1",
+      NEXT_WEBPACK_BUILD_WORKER:
+        process.env.NEXT_WEBPACK_BUILD_WORKER || "false",
+    },
   },
-});
+);
 
 child.on("exit", (code, signal) => {
   if (signal) {

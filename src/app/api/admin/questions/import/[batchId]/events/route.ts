@@ -111,9 +111,16 @@ export async function GET(
             if (
               snapshot.status === "READY" ||
               snapshot.status === "CONFIRMED" ||
+              snapshot.status === "CANCELLED" ||
               snapshot.status === "FAILED"
             ) {
-              send(snapshot.status === "FAILED" ? "failed" : "completed", snapshot);
+              if (snapshot.status === "FAILED") {
+                send("failed", snapshot);
+              } else if (snapshot.status === "CANCELLED") {
+                send("cancelled", snapshot);
+              } else {
+                send("completed", snapshot);
+              }
               close();
               break;
             }

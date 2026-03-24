@@ -3,7 +3,11 @@
 import { Button, Modal, Pagination, Tabs } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { QuestionImportBatchDetail } from "@/shared/types/domain";
+import type {
+  QuestionImportBatchDetail,
+  QuestionImportDraftItem,
+  QuestionImportSourceRowItem,
+} from "@/shared/types/domain";
 import { withAppBasePath } from "@/shared/utils/app-path";
 import { getQuestionTypeLabel } from "@/shared/utils/answers";
 import {
@@ -30,7 +34,11 @@ function getBatchProgressPercent(batch: QuestionImportBatchDetail) {
     );
   }
 
-  if (batch.status === "READY" || batch.status === "CONFIRMED") {
+  if (
+    batch.status === "READY" ||
+    batch.status === "CONFIRMED" ||
+    batch.status === "CANCELLED"
+  ) {
     return 100;
   }
 
@@ -42,18 +50,22 @@ function getBatchProgressText(batch: QuestionImportBatchDetail) {
     batch.totalSourceRows > 0
       ? `${batch.processedSourceRows}/${batch.totalSourceRows} 行`
       : batch.status === "READY" || batch.status === "CONFIRMED"
-        ? "已完成"
-        : batch.status === "FAILED"
-          ? "已失败"
-          : "等待生成来源行";
+        ? "来源行已处理完成"
+        : batch.status === "CANCELLED"
+          ? "来源行处理已终止"
+          : batch.status === "FAILED"
+            ? "来源行处理失败"
+            : "等待生成来源行";
   const chunkProgress =
     batch.totalChunks > 0
-      ? `${batch.processedChunks}/${batch.totalChunks} 块`
+      ? `${batch.processedChunks}/${batch.totalChunks} 个分块`
       : batch.status === "READY" || batch.status === "CONFIRMED"
-        ? "分块完成"
-        : batch.status === "FAILED"
-          ? "分块中断"
-          : "等待分块";
+        ? "分块处理完成"
+        : batch.status === "CANCELLED"
+          ? "分块处理已终止"
+          : batch.status === "FAILED"
+            ? "分块处理失败"
+            : "等待生成分块";
   const concurrencyText =
     batch.currentConcurrency > 0
       ? `当前并发 ${batch.currentConcurrency}`
@@ -61,7 +73,7 @@ function getBatchProgressText(batch: QuestionImportBatchDetail) {
 
   return [rowProgress, chunkProgress, concurrencyText]
     .filter(Boolean)
-    .join(" · ");
+    .join(" / ");
 }
 
 function getBatchProcessingHint(batch: QuestionImportBatchDetail) {
@@ -70,10 +82,67 @@ function getBatchProcessingHint(batch: QuestionImportBatchDetail) {
   }
 
   if (batch.status === "PROCESSING") {
-    return "系统正在解析 Excel、拆分题目并更新来源行判定，请稍候。";
+    return "系统正在解析 Excel、拆分题目并刷新来源行状态，请稍候。";
+  }
+
+  if (batch.status === "READY") {
+    return "解析已经完成，请检查草稿并决定确认导入或终止本批次。";
+  }
+
+  if (batch.status === "CANCELLED") {
+    return "当前批次已终止，已生成的草稿和来源行已作废，不会继续导入题库。";
+  }
+
+  if (batch.status === "FAILED") {
+    return "当前批次解析失败，请根据错误信息修正文件后重新上传。";
+  }
+
+  if (batch.status === "CONFIRMED") {
+    return "当前批次已经确认导入，草稿结果仅保留用于追溯。";
   }
 
   return "";
+}
+
+function getBatchStatusTone(status: QuestionImportBatchDetail["status"]) {
+  switch (status) {
+    case "READY":
+    case "CONFIRMED":
+      return "is-active";
+    default:
+      return "is-inactive";
+  }
+}
+
+function isBatchCancelable(status: QuestionImportBatchDetail["status"]) {
+  return ["PENDING", "PROCESSING", "READY"].includes(status);
+}
+
+function isTerminalBatchStatus(status: QuestionImportBatchDetail["status"]) {
+  return ["READY", "CONFIRMED", "FAILED", "CANCELLED"].includes(status);
+}
+
+function appendUniqueById<T extends { id: string }>(current: T[], incoming: T[]) {
+  if (incoming.length === 0) {
+    return current;
+  }
+
+  const existingIds = new Set(current.map((item) => item.id));
+  const appended = incoming.filter((item) => !existingIds.has(item.id));
+  if (appended.length === 0) {
+    return current;
+  }
+
+  return [...current, ...appended];
+}
+
+interface RefreshBatchOptions {
+  resetPagination?: boolean;
+  draftPage?: number;
+  draftPageSize?: number;
+  draftKeyword?: string;
+  sourceRowPage?: number;
+  sourceRowPageSize?: number;
 }
 
 export function QuestionImportModal({
@@ -136,18 +205,17 @@ export function QuestionImportModal({
     sourceRowPageSizeRef.current = sourceRowPageSize;
   }, [sourceRowPageSize]);
 
+  const closeBatchEventStream = useCallback(() => {
+    if (!eventSourceRef.current) {
+      return;
+    }
+
+    eventSourceRef.current.close();
+    eventSourceRef.current = null;
+  }, []);
+
   const refreshBatch = useCallback(
-    async (
-      batchId: string,
-      options?: {
-        resetPagination?: boolean;
-        draftPage?: number;
-        draftPageSize?: number;
-        draftKeyword?: string;
-        sourceRowPage?: number;
-        sourceRowPageSize?: number;
-      },
-    ) => {
+    async (currentBatchId: string, options?: RefreshBatchOptions) => {
       const nextDraftPageSize =
         options?.draftPageSize ?? draftPageSizeRef.current;
       const nextSourceRowPageSize =
@@ -160,6 +228,7 @@ export function QuestionImportModal({
         : (options?.sourceRowPage ?? sourceRowPageRef.current);
       const nextDraftKeyword =
         options?.draftKeyword ?? draftKeywordRef.current;
+
       setIsRefreshingBatch(true);
 
       try {
@@ -172,7 +241,7 @@ export function QuestionImportModal({
         });
         const response = await fetch(
           withAppBasePath(
-            `/api/admin/questions/import/${batchId}?${searchParams.toString()}`,
+            `/api/admin/questions/import/${currentBatchId}?${searchParams.toString()}`,
           ),
         );
         const payload = (await response
@@ -186,17 +255,6 @@ export function QuestionImportModal({
           return;
         }
 
-        const safeDraftPage = getSafePage(
-          payload.draftTotal,
-          nextDraftPageSize,
-          nextDraftPage,
-        );
-        const safeSourceRowPage = getSafePage(
-          payload.sourceRowTotal,
-          nextSourceRowPageSize,
-          nextSourceRowPage,
-        );
-
         setBatch(payload);
         setErrorMessage("");
         setSelectedDraftIds((current) =>
@@ -204,11 +262,19 @@ export function QuestionImportModal({
             payload.drafts.some((draft) => draft.id === draftId),
           ),
         );
-        setDraftPage(safeDraftPage);
+        setDraftPage(
+          getSafePage(payload.draftTotal, nextDraftPageSize, nextDraftPage),
+        );
         setDraftPageSize(nextDraftPageSize);
         setDraftKeyword(nextDraftKeyword);
         setDraftKeywordInput(nextDraftKeyword);
-        setSourceRowPage(safeSourceRowPage);
+        setSourceRowPage(
+          getSafePage(
+            payload.sourceRowTotal,
+            nextSourceRowPageSize,
+            nextSourceRowPage,
+          ),
+        );
         setSourceRowPageSize(nextSourceRowPageSize);
       } catch {
         setErrorMessage("获取导题批次详情失败");
@@ -218,15 +284,6 @@ export function QuestionImportModal({
     },
     [],
   );
-
-  const closeBatchEventStream = useCallback(() => {
-    if (!eventSourceRef.current) {
-      return;
-    }
-
-    eventSourceRef.current.close();
-    eventSourceRef.current = null;
-  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -240,7 +297,6 @@ export function QuestionImportModal({
       setDraftKeywordInput("");
       setSourceRowPage(1);
       setSourceRowPageSize(10);
-      setIsRefreshingBatch(false);
       closeBatchEventStream();
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -248,19 +304,33 @@ export function QuestionImportModal({
       return;
     }
 
-    if (initialBatchId) {
-      void refreshBatch(initialBatchId, {
-        resetPagination: true,
-        draftKeyword: "",
-      });
+    if (!initialBatchId) {
+      setBatch(null);
+      setSelectedDraftIds([]);
+      setErrorMessage("");
+      setSuccessMessage("");
+      setDraftPage(1);
+      setDraftPageSize(10);
+      setDraftKeyword("");
+      setDraftKeywordInput("");
+      setSourceRowPage(1);
+      setSourceRowPageSize(10);
+      closeBatchEventStream();
+      return;
     }
+
+    void refreshBatch(initialBatchId, {
+      resetPagination: true,
+      draftKeyword: "",
+    });
   }, [closeBatchEventStream, initialBatchId, open, refreshBatch]);
 
   useEffect(() => {
     if (
       !open ||
       !batchId ||
-      !["PENDING", "PROCESSING"].includes(batchStatus ?? "")
+      !batchStatus ||
+      !["PENDING", "PROCESSING"].includes(batchStatus)
     ) {
       closeBatchEventStream();
       return;
@@ -278,66 +348,7 @@ export function QuestionImportModal({
     );
     eventSourceRef.current = eventSource;
 
-    const mergeDrafts = (items: QuestionImportBatchDetail["drafts"]) => {
-      setBatch((current) => {
-        if (!current) {
-          return current;
-        }
-
-        const seen = new Set(current.drafts.map((draft) => draft.id));
-        const nextDrafts = [...current.drafts];
-        for (const item of items) {
-          if (!seen.has(item.id)) {
-            nextDrafts.push(item);
-            seen.add(item.id);
-          }
-        }
-
-        nextDrafts.sort((left, right) => left.sortOrder - right.sortOrder);
-        const nextDraftTotal = Math.max(current.draftTotal, nextDrafts.length);
-        setDraftPage((page) =>
-          Math.max(page, Math.ceil(nextDraftTotal / draftPageSize)),
-        );
-        return {
-          ...current,
-          draftTotal: nextDraftTotal,
-          drafts: nextDrafts,
-        };
-      });
-    };
-
-    const mergeSourceRows = (items: QuestionImportBatchDetail["sourceRows"]) => {
-      setBatch((current) => {
-        if (!current) {
-          return current;
-        }
-
-        const seen = new Set(current.sourceRows.map((row) => row.id));
-        const nextSourceRows = [...current.sourceRows];
-        for (const item of items) {
-          if (!seen.has(item.id)) {
-            nextSourceRows.push(item);
-            seen.add(item.id);
-          }
-        }
-
-        nextSourceRows.sort((left, right) => left.rowNumber - right.rowNumber);
-        const nextSourceRowTotal = Math.max(
-          current.sourceRowTotal,
-          nextSourceRows.length,
-        );
-        setSourceRowPage((page) =>
-          Math.max(page, Math.ceil(nextSourceRowTotal / sourceRowPageSize)),
-        );
-        return {
-          ...current,
-          sourceRowTotal: nextSourceRowTotal,
-          sourceRows: nextSourceRows,
-        };
-      });
-    };
-
-    const updateSummary = (payload: Partial<QuestionImportBatchDetail>) => {
+    const replaceSummary = (payload: Partial<QuestionImportBatchDetail>) => {
       setBatch((current) => {
         if (!current) {
           return current;
@@ -355,43 +366,78 @@ export function QuestionImportModal({
     };
 
     eventSource.addEventListener("progress", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as Partial<QuestionImportBatchDetail>;
-      updateSummary(payload);
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as Partial<QuestionImportBatchDetail>;
+      replaceSummary(payload);
     });
 
     eventSource.addEventListener("drafts_appended", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as QuestionImportBatchDetail["drafts"];
-      mergeDrafts(payload);
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as QuestionImportDraftItem[];
+      setBatch((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          drafts: appendUniqueById(current.drafts, payload),
+          draftTotal: Math.max(current.draftTotal, current.drafts.length + payload.length),
+        };
+      });
     });
 
     eventSource.addEventListener("source_rows_appended", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as QuestionImportBatchDetail["sourceRows"];
-      mergeSourceRows(payload);
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as QuestionImportSourceRowItem[];
+      setBatch((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          sourceRows: appendUniqueById(current.sourceRows, payload),
+          sourceRowTotal: Math.max(
+            current.sourceRowTotal,
+            current.sourceRows.length + payload.length,
+          ),
+        };
+      });
     });
 
     eventSource.addEventListener("completed", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as Partial<QuestionImportBatchDetail>;
-      updateSummary(payload);
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as Partial<QuestionImportBatchDetail>;
+      replaceSummary(payload);
       closeBatchEventStream();
+      void refreshBatch(batchId);
     });
 
     eventSource.addEventListener("failed", (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as
-        | Partial<QuestionImportBatchDetail>
-        | { message?: string };
-      const message =
-        "message" in payload && typeof payload.message === "string"
-          ? payload.message
-          : "";
-      if (!("id" in payload)) {
-        if (message) {
-          setErrorMessage(message);
-        }
-      } else {
-        updateSummary(payload);
-        setErrorMessage("");
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as Partial<QuestionImportBatchDetail> & { message?: string };
+      replaceSummary(payload);
+      if (payload.message) {
+        setErrorMessage(payload.message);
       }
       closeBatchEventStream();
+      void refreshBatch(batchId);
+    });
+
+    eventSource.addEventListener("cancelled", (event) => {
+      const payload = JSON.parse(
+        (event as MessageEvent).data,
+      ) as Partial<QuestionImportBatchDetail>;
+      replaceSummary(payload);
+      setSuccessMessage("导题批次已终止");
+      closeBatchEventStream();
+      void refreshBatch(batchId);
     });
 
     eventSource.onerror = () => {
@@ -411,11 +457,10 @@ export function QuestionImportModal({
     batchId,
     batchStatus,
     closeBatchEventStream,
-    draftPageSize,
     lastDraftSortOrder,
     lastSourceRowNumber,
     open,
-    sourceRowPageSize,
+    refreshBatch,
   ]);
 
   const allDraftIds = useMemo(
@@ -423,9 +468,17 @@ export function QuestionImportModal({
     [batch],
   );
   const isAllSelected =
-    allDraftIds.length > 0 && selectedDraftIds.length === allDraftIds.length;
+    allDraftIds.length > 0 &&
+    allDraftIds.every((draftId) => selectedDraftIds.includes(draftId));
   const isStreamingBatch =
     !!batch && ["PENDING", "PROCESSING"].includes(batch.status);
+  const canShowResultTabs =
+    !!batch &&
+    (isTerminalBatchStatus(batch.status) ||
+      batch.draftTotal > 0 ||
+      batch.sourceRowTotal > 0);
+  const canManageDrafts = batch?.status === "READY";
+  const progressPercent = batch ? getBatchProgressPercent(batch) : 0;
   const pagedDrafts = isStreamingBatch
     ? batch?.drafts.slice(
         (draftPage - 1) * draftPageSize,
@@ -438,12 +491,6 @@ export function QuestionImportModal({
         sourceRowPage * sourceRowPageSize,
       )
     : batch?.sourceRows;
-  const canShowResultTabs =
-    !!batch &&
-    (["READY", "CONFIRMED", "FAILED"].includes(batch.status) ||
-      batch.draftTotal > 0 ||
-      batch.sourceRowTotal > 0);
-  const progressPercent = batch ? getBatchProgressPercent(batch) : 0;
 
   async function handleDraftPaginationChange(page: number, pageSize: number) {
     setDraftPage(page);
@@ -453,10 +500,7 @@ export function QuestionImportModal({
       return;
     }
 
-    await refreshBatch(batch.id, {
-      draftPage: page,
-      draftPageSize: pageSize,
-    });
+    await refreshBatch(batch.id, { draftPage: page, draftPageSize: pageSize });
   }
 
   async function handleSourceRowPaginationChange(
@@ -484,10 +528,9 @@ export function QuestionImportModal({
       return;
     }
 
-    const nextKeyword = draftKeywordInput.trim();
     await refreshBatch(batch.id, {
       draftPage: 1,
-      draftKeyword: nextKeyword,
+      draftKeyword: draftKeywordInput.trim(),
     });
   }
 
@@ -531,7 +574,6 @@ export function QuestionImportModal({
         method: "POST",
         body: formData,
       });
-
       const payload = (await response.json().catch(() => ({}))) as {
         batchId?: string;
         message?: string;
@@ -546,8 +588,6 @@ export function QuestionImportModal({
         fileInputRef.current.value = "";
       }
 
-      setDraftKeyword("");
-      setDraftKeywordInput("");
       await refreshBatch(payload.batchId, {
         resetPagination: true,
         draftKeyword: "",
@@ -561,12 +601,59 @@ export function QuestionImportModal({
     }
   }
 
+  async function handleCancelBatch() {
+    if (!batch || !isBatchCancelable(batch.status)) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "终止后当前批次会被作废，已生成的草稿不会继续导入，确认终止吗？",
+      )
+    ) {
+      return;
+    }
+
+    setErrorMessage("");
+    setSuccessMessage("");
+    setIsMutating(true);
+
+    try {
+      const response = await fetch(
+        withAppBasePath(`/api/admin/questions/import/${batch.id}/cancel`),
+        {
+          method: "POST",
+        },
+      );
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as QuestionImportBatchDetail & {
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setErrorMessage(payload.message ?? "终止导题批次失败");
+        return;
+      }
+
+      closeBatchEventStream();
+      setBatch(payload);
+      setSelectedDraftIds([]);
+      setSuccessMessage("导题批次已终止");
+      onBatchChange?.();
+    } catch {
+      setErrorMessage("终止导题批次失败");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
   async function handleDeleteDraft(draftId: string) {
     if (!batch) {
       return;
     }
 
-    if (!window.confirm("删除后该草稿将不会导入题库，确认删除吗？")) {
+    if (!window.confirm("删除后该草稿将不再导入题库，确认删除吗？")) {
       return;
     }
 
@@ -592,11 +679,8 @@ export function QuestionImportModal({
         return;
       }
 
-      await refreshBatch(batch.id);
-      setSelectedDraftIds((current) =>
-        current.filter((item) => item !== draftId),
-      );
-      setDraftPage(1);
+      setBatch(payload);
+      setSelectedDraftIds((current) => current.filter((item) => item !== draftId));
       onBatchChange?.();
     } catch {
       setErrorMessage("删除草稿失败");
@@ -635,7 +719,6 @@ export function QuestionImportModal({
           }),
         },
       );
-
       const payload = (await response
         .json()
         .catch(() => ({}))) as QuestionImportBatchDetail & {
@@ -647,9 +730,8 @@ export function QuestionImportModal({
         return;
       }
 
-      await refreshBatch(batch.id);
+      setBatch(payload);
       setSelectedDraftIds([]);
-      setDraftPage(1);
       onBatchChange?.();
     } catch {
       setErrorMessage("批量删除草稿失败");
@@ -663,11 +745,7 @@ export function QuestionImportModal({
       return;
     }
 
-    if (
-      !window.confirm(
-          `确认将当前保留的 ${batch.draftCount} 道题目导入正式题库吗？`,
-      )
-    ) {
+    if (!window.confirm(`确认将当前保留的 ${batch.draftCount} 道题目导入正式题库吗？`)) {
       return;
     }
 
@@ -682,26 +760,48 @@ export function QuestionImportModal({
           method: "POST",
         },
       );
-
       const payload = (await response
         .json()
         .catch(() => ({}))) as QuestionImportBatchDetail & {
         message?: string;
       };
+
       if (!response.ok) {
         setErrorMessage(payload.message ?? "确认导入失败");
         return;
       }
 
-      await refreshBatch(batch.id);
+      setBatch(payload);
       setSelectedDraftIds([]);
-      setSuccessMessage(`导入完成，共纳入 ${payload.draftCount} 道题目。`);
+      setSuccessMessage(`导入完成，共导入 ${payload.draftCount} 道题目。`);
       onSuccess();
     } catch {
       setErrorMessage("确认导入失败");
     } finally {
       setIsMutating(false);
     }
+  }
+
+  function toggleDraftSelection(draftId: string) {
+    setSelectedDraftIds((current) =>
+      current.includes(draftId)
+        ? current.filter((item) => item !== draftId)
+        : [...current, draftId],
+    );
+  }
+
+  function toggleAllDraftSelection() {
+    if (isAllSelected) {
+      setSelectedDraftIds((current) =>
+        current.filter((draftId) => !allDraftIds.includes(draftId)),
+      );
+      return;
+    }
+
+    setSelectedDraftIds((current) => [
+      ...current.filter((draftId) => !allDraftIds.includes(draftId)),
+      ...allDraftIds,
+    ]);
   }
 
   return (
@@ -724,8 +824,7 @@ export function QuestionImportModal({
       <div className="list-grid admin-import-modal-content">
         <form onSubmit={handleUpload} className="admin-modal-upload">
           <div className="page-note">
-            只有符合标准模板的文件才按规则解析，其他文件统一交给 AI
-            识别。每一行都会记录是否能形成题目。
+            标准模板会按字段规则解析，非标准模板会交给 AI 识别。系统会保留每一行来源记录，便于排查题目草稿与失败原因。
           </div>
           <div className="inline-actions">
             <a href={withAppBasePath("/api/admin/questions/import/template")}>
@@ -749,365 +848,350 @@ export function QuestionImportModal({
                 刷新当前批次
               </Button>
             ) : null}
+            {batch && isBatchCancelable(batch.status) ? (
+              <Button
+                danger
+                onClick={() => void handleCancelBatch()}
+                loading={isMutating}
+                disabled={isUploading}
+              >
+                终止导入
+              </Button>
+            ) : null}
           </div>
         </form>
 
-        {batch ? (
+        {errorMessage ? (
+          <div className="mobile-feedback is-error">{errorMessage}</div>
+        ) : null}
+        {successMessage ? (
+          <div className="mobile-feedback is-success">{successMessage}</div>
+        ) : null}
+
+        {!batch ? (
+          <div className="admin-empty-state">
+            上传 Excel 后会生成一个独立的导题批次。解析中的批次支持实时查看进度，待确认的批次可以继续删草稿或直接终止。
+          </div>
+        ) : (
           <>
-            <section className="admin-summary-grid is-import-compact">
-              <div className="admin-summary-card">
-                <span>文件名</span>
-                <strong title={batch.fileName}>
-                  {truncateText(batch.fileName, 32)}
-                </strong>
-              </div>
-              <div className="admin-summary-card">
-                <span>解析方式</span>
-                <strong>
-                  {getImportTemplateTypeLabel(batch.templateType)}
-                </strong>
-              </div>
-              <div className="admin-summary-card">
-                <span>状态</span>
+            <div className="admin-summary-grid is-import-compact">
+              <article className="admin-summary-card">
+                <span>当前状态</span>
                 <strong>{getBatchStatusLabel(batch.status)}</strong>
-              </div>
-              <div className="admin-summary-card">
-                <span>草稿数量</span>
-                <strong>{batch.draftCount}</strong>
-              </div>
-              <div className="admin-summary-card">
-                <span>来源行数</span>
-                <strong>
-                  {batch.totalSourceRows || batch.sourceRows.length}
-                </strong>
-              </div>
-              <div className="admin-summary-card">
-                <span>工作表</span>
-                <strong>{batch.sourceSheetName || "-"}</strong>
-              </div>
-              <div className="admin-summary-card">
+              </article>
+              <article className="admin-summary-card">
+                <span>解析方式</span>
+                <strong>{getImportTemplateTypeLabel(batch.templateType)}</strong>
+              </article>
+              <article className="admin-summary-card">
+                <span>可用草稿</span>
+                <strong>{batch.draftCount} 道</strong>
+              </article>
+              <article className="admin-summary-card">
+                <span>来源行</span>
+                <strong>{batch.totalSourceRows} 行</strong>
+              </article>
+              <article className="admin-summary-card">
                 <span>上传时间</span>
                 <strong>{formatDateTime(batch.createdAt)}</strong>
+              </article>
+              <article className="admin-summary-card">
+                <span>
+                  {batch.status === "CONFIRMED"
+                    ? "确认时间"
+                    : batch.status === "CANCELLED"
+                      ? "终止时间"
+                      : "解析完成时间"}
+                </span>
+                <strong>
+                  {formatDateTime(
+                    batch.status === "CONFIRMED"
+                      ? batch.confirmedAt
+                      : batch.status === "CANCELLED"
+                        ? batch.cancelledAt
+                        : batch.parsedAt,
+                  )}
+                </strong>
+              </article>
+            </div>
+
+            <section className="admin-progress-panel">
+              <div className="admin-progress-panel-head">
+                <div className="admin-page-header-copy is-compact">
+                  <h2>{truncateText(batch.fileName, 60)}</h2>
+                  <p>{getBatchProcessingHint(batch)}</p>
+                </div>
+                <span
+                  className={`admin-status-pill ${getBatchStatusTone(batch.status)}`}
+                >
+                  {getBatchStatusLabel(batch.status)}
+                </span>
               </div>
-              <div className="admin-summary-card">
-                <span>解析时间</span>
-                <strong>{formatDateTime(batch.parsedAt)}</strong>
+              <div className="progress-row">
+                <span>{getBatchProgressText(batch)}</span>
+                <strong className="admin-progress-percent">{progressPercent}%</strong>
               </div>
-              <div className="admin-summary-card">
-                <span>确认时间</span>
-                <strong>{formatDateTime(batch.confirmedAt)}</strong>
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${progressPercent}%` }}
+                />
               </div>
+              {batch.schemaMode || batch.sourceSheetName ? (
+                <div className="page-note">
+                  {batch.schemaMode ? `结构识别：${batch.schemaMode}` : null}
+                  {batch.schemaMode && batch.sourceSheetName ? " / " : null}
+                  {batch.sourceSheetName
+                    ? `工作表：${batch.sourceSheetName}`
+                    : null}
+                </div>
+              ) : null}
+              {batch.lastError ? (
+                <div className="mobile-feedback is-error">{batch.lastError}</div>
+              ) : null}
             </section>
 
-            {["PENDING", "PROCESSING"].includes(batch.status) ? (
-              <section className="admin-progress-panel">
-                <div className="admin-progress-panel-head">
-                  <div>
-                    <strong>当前处理进度</strong>
-                    <p className="page-note" style={{ margin: "6px 0 0" }}>
-                      {getBatchProcessingHint(batch)}
-                    </p>
-                  </div>
-                  <span className="admin-progress-percent">
-                    {progressPercent}%
-                  </span>
-                </div>
-                <div className="progress-track admin-progress-track">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-                <div className="admin-progress-meta">
-                  <span>{getBatchProgressText(batch)}</span>
-                  {isRefreshingBatch ? <span>正在刷新批次状态…</span> : null}
-                </div>
-              </section>
+            {batch.status === "READY" ? (
+              <div className="inline-actions">
+                <Button
+                  type="primary"
+                  onClick={() => void handleConfirmImport()}
+                  loading={isMutating}
+                  disabled={batch.draftCount === 0 || isUploading}
+                >
+                  确认导入 {batch.draftCount} 道题目
+                </Button>
+                <Button
+                  onClick={() => void handleDeleteSelected()}
+                  disabled={
+                    selectedDraftIds.length === 0 || isMutating || isUploading
+                  }
+                >
+                  删除已选草稿
+                </Button>
+                <Button
+                  danger
+                  onClick={() => void handleCancelBatch()}
+                  loading={isMutating}
+                  disabled={isUploading}
+                >
+                  终止当前批次
+                </Button>
+              </div>
+            ) : null}
+
+            {canShowResultTabs ? (
+              <Tabs
+                className="admin-modal-tabs is-compact"
+                destroyOnHidden
+                items={[
+                  {
+                    key: "drafts",
+                    label: `题目草稿 (${batch.draftTotal})`,
+                    children: (
+                      <div className="list-grid">
+                        <form
+                          className="admin-import-search-form"
+                          onSubmit={handleDraftSearchSubmit}
+                        >
+                          <input
+                            className="admin-import-search-input"
+                            value={draftKeywordInput}
+                            onChange={(event) =>
+                              setDraftKeywordInput(event.target.value)
+                            }
+                            placeholder="搜索题干、法条来源或原始内容"
+                            disabled={isStreamingBatch}
+                          />
+                          <Button
+                            htmlType="submit"
+                            disabled={isStreamingBatch || isMutating}
+                          >
+                            搜索草稿
+                          </Button>
+                          <Button
+                            onClick={() => void handleDraftSearchReset()}
+                            disabled={isStreamingBatch || isMutating}
+                          >
+                            重置
+                          </Button>
+                          {draftKeyword ? (
+                            <span className="page-note">
+                              当前关键词：{draftKeyword}
+                            </span>
+                          ) : null}
+                        </form>
+
+                        {canManageDrafts && batch.drafts.length > 0 ? (
+                          <div className="inline-actions">
+                            <Button
+                              onClick={toggleAllDraftSelection}
+                              disabled={isMutating}
+                            >
+                              {isAllSelected ? "取消全选" : "全选当前页"}
+                            </Button>
+                            <span className="page-note">
+                              已选 {selectedDraftIds.length} 条草稿
+                            </span>
+                          </div>
+                        ) : null}
+
+                        {pagedDrafts && pagedDrafts.length > 0 ? (
+                          <>
+                            <div className="admin-table-wrap">
+                              <table className="admin-table is-import-detail-table">
+                                <thead>
+                                  <tr>
+                                    {canManageDrafts ? (
+                                      <th style={{ width: 56 }}>选择</th>
+                                    ) : null}
+                                    <th style={{ width: 88 }}>序号</th>
+                                    <th style={{ width: 96 }}>题型</th>
+                                    <th style={{ width: "28%" }}>题干</th>
+                                    <th style={{ width: "24%" }}>选项</th>
+                                    <th style={{ width: 140 }}>正确答案</th>
+                                    <th style={{ width: 160 }}>来源行</th>
+                                    <th style={{ width: "22%" }}>原始内容</th>
+                                    {canManageDrafts ? (
+                                      <th style={{ width: 120 }}>操作</th>
+                                    ) : null}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {pagedDrafts.map((draft) => (
+                                    <tr key={draft.id}>
+                                      {canManageDrafts ? (
+                                        <td>
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedDraftIds.includes(draft.id)}
+                                            onChange={() => toggleDraftSelection(draft.id)}
+                                            disabled={isMutating}
+                                          />
+                                        </td>
+                                      ) : null}
+                                      <td>{draft.sortOrder}</td>
+                                      <td>{getQuestionTypeLabel(draft.type)}</td>
+                                      <td title={draft.stem}>
+                                        {truncateText(draft.stem, 120)}
+                                      </td>
+                                      <td title={joinOptions(draft.options)}>
+                                        {truncateText(joinOptions(draft.options), 120)}
+                                      </td>
+                                      <td>{draft.correctAnswers.join(", ") || "-"}</td>
+                                      <td>
+                                        {draft.sourceRowNumbers.length > 0
+                                          ? draft.sourceRowNumbers.join(", ")
+                                          : "-"}
+                                      </td>
+                                      <td title={draft.sourceContent || "-"}>
+                                        {truncateText(draft.sourceContent, 100)}
+                                      </td>
+                                      {canManageDrafts ? (
+                                        <td>
+                                          <button
+                                            type="button"
+                                            className="admin-table-inline-button is-danger"
+                                            onClick={() => void handleDeleteDraft(draft.id)}
+                                            disabled={isMutating}
+                                          >
+                                            删除草稿
+                                          </button>
+                                        </td>
+                                      ) : null}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <Pagination
+                              current={draftPage}
+                              pageSize={draftPageSize}
+                              total={batch.draftTotal}
+                              pageSizeOptions={draftPageSizeOptions.map(String)}
+                              showSizeChanger
+                              showTotal={(total) => `共 ${total} 条草稿`}
+                              onChange={(page, pageSize) =>
+                                void handleDraftPaginationChange(page, pageSize)
+                              }
+                            />
+                          </>
+                        ) : (
+                          <div className="admin-empty-state">
+                            {isStreamingBatch
+                              ? "当前还没有生成可展示的题目草稿，请继续等待解析。"
+                              : "当前批次没有可展示的题目草稿。"}
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "sourceRows",
+                    label: `来源行 (${batch.sourceRowTotal})`,
+                    children: (
+                      <div className="list-grid">
+                        {pagedSourceRows && pagedSourceRows.length > 0 ? (
+                          <>
+                            <div className="admin-table-wrap">
+                              <table className="admin-table is-import-detail-table">
+                                <thead>
+                                  <tr>
+                                    <th style={{ width: 88 }}>行号</th>
+                                    <th style={{ width: 108 }}>状态</th>
+                                    <th style={{ width: 160 }}>匹配题号</th>
+                                    <th style={{ width: 180 }}>失败原因</th>
+                                    <th style={{ width: "48%" }}>原始内容</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {pagedSourceRows.map((row) => (
+                                    <tr key={row.id}>
+                                      <td>{row.rowNumber}</td>
+                                      <td>{getImportSourceStatusLabel(row.status)}</td>
+                                      <td>
+                                        {row.matchedSortOrders.length > 0
+                                          ? row.matchedSortOrders.join(", ")
+                                          : "-"}
+                                      </td>
+                                      <td title={row.reason || "-"}>
+                                        {truncateText(row.reason, 80)}
+                                      </td>
+                                      <td title={row.content}>
+                                        {truncateText(row.content, 180)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <Pagination
+                              current={sourceRowPage}
+                              pageSize={sourceRowPageSize}
+                              total={batch.sourceRowTotal}
+                              pageSizeOptions={sourceRowPageSizeOptions.map(String)}
+                              showSizeChanger
+                              showTotal={(total) => `共 ${total} 行来源记录`}
+                              onChange={(page, pageSize) =>
+                                void handleSourceRowPaginationChange(page, pageSize)
+                              }
+                            />
+                          </>
+                        ) : (
+                          <div className="admin-empty-state">
+                            {isStreamingBatch
+                              ? "来源行正在生成中，稍后会自动展示。"
+                              : "当前批次没有来源行记录。"}
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
             ) : null}
           </>
-        ) : (
-          <section className="admin-empty-state">
-            上传 Excel
-            后，解析结果会显示在这里。你可以删除不合理草稿，也可以查看失败行原因。
-          </section>
         )}
-
-        {canShowResultTabs ? (
-          <Tabs
-            className="admin-modal-tabs is-compact"
-            items={[
-              {
-                key: "drafts",
-                        label: `待确认题目（${batch?.draftCount ?? 0}）`,
-                children: (
-                  <div className="list-grid">
-                    {batch?.status === "READY" ? (
-                      <div className="inline-actions">
-                        <Button
-                          onClick={() =>
-                            setSelectedDraftIds(() =>
-                              isAllSelected ? [] : allDraftIds,
-                            )
-                          }
-                          disabled={isMutating}
-                        >
-                          {isAllSelected ? "取消全选" : "全选"}
-                        </Button>
-                        <Button
-                          danger
-                          disabled={selectedDraftIds.length === 0 || isMutating}
-                          onClick={() => void handleDeleteSelected()}
-                        >
-                          删除已选
-                        </Button>
-                          <Button
-                            type="primary"
-                            loading={isMutating}
-                            disabled={batch.draftCount === 0}
-                            onClick={() => void handleConfirmImport()}
-                          >
-                            确认导入 {batch?.draftCount ?? 0} 道题
-                        </Button>
-                      </div>
-                    ) : batch?.status === "CONFIRMED" ? (
-                      <div className="page-note">
-                        当前批次已完成导入，以下结果为只读展示。
-                      </div>
-                    ) : (
-                      <div className="page-note">
-                        当前批次没有可确认题目时，会在“来源行判定”中展示失败原因。
-                      </div>
-                    )}
-
-                    {batch?.status === "PENDING" ||
-                    batch?.status === "PROCESSING" ? (
-                      <div className="page-note">
-                        已识别完成的题目会实时追加到下方列表，无需等待整批处理结束再查看。
-                      </div>
-                    ) : null}
-
-                    <form
-                      onSubmit={(event) => void handleDraftSearchSubmit(event)}
-                      className="admin-import-search-form"
-                    >
-                      <input
-                        className="admin-import-search-input"
-                        type="search"
-                        placeholder="搜索题干、来源说明或来源行"
-                        value={draftKeywordInput}
-                        onChange={(event) =>
-                          setDraftKeywordInput(event.target.value)
-                        }
-                        disabled={isStreamingBatch || isRefreshingBatch}
-                      />
-                      <Button
-                        htmlType="submit"
-                        size="small"
-                        disabled={isStreamingBatch || isRefreshingBatch}
-                      >
-                        搜索
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => void handleDraftSearchReset()}
-                        disabled={
-                          isStreamingBatch ||
-                          isRefreshingBatch ||
-                          (!draftKeyword && !draftKeywordInput)
-                        }
-                      >
-                        清空
-                      </Button>
-                      {draftKeyword ? (
-                        <span className="page-note">
-                          当前命中 {batch?.draftTotal ?? 0} 条，批次总草稿{" "}
-                          {batch?.draftCount ?? 0} 条
-                        </span>
-                      ) : null}
-                    </form>
-
-                    {batch?.draftTotal ? (
-                      <>
-                        <div className="admin-table-wrap">
-                          <table className="admin-table is-import-detail-table">
-                            <thead>
-                              <tr>
-                                <th style={{ width: 54 }}>选择</th>
-                                <th style={{ width: 88 }}>序号</th>
-                                <th style={{ width: 108 }}>题型</th>
-                                <th style={{ width: "24%" }}>题干</th>
-                                <th style={{ width: "24%" }}>选项</th>
-                                <th style={{ width: 132 }}>正确答案</th>
-                                <th style={{ width: "18%" }}>解析</th>
-                                <th style={{ width: 180 }}>答案来源</th>
-                                <th style={{ width: 140 }}>来源行号</th>
-                                <th style={{ width: 120 }}>操作</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {pagedDrafts?.map((draft) => (
-                                <tr key={draft.id}>
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedDraftIds.includes(
-                                        draft.id,
-                                      )}
-                                      disabled={batch.status !== "READY"}
-                                      onChange={(event) =>
-                                        setSelectedDraftIds((current) =>
-                                          event.target.checked
-                                            ? [...current, draft.id]
-                                            : current.filter(
-                                                (item) => item !== draft.id,
-                                              ),
-                                        )
-                                      }
-                                    />
-                                  </td>
-                                  <td>{draft.sortOrder}</td>
-                                  <td>{getQuestionTypeLabel(draft.type)}</td>
-                                  <td title={draft.stem}>
-                                    {truncateText(draft.stem, 80)}
-                                  </td>
-                                  <td title={joinOptions(draft.options)}>
-                                    {truncateText(
-                                      joinOptions(draft.options),
-                                      120,
-                                    )}
-                                  </td>
-                                  <td>{draft.correctAnswers.join(", ")}</td>
-                                  <td title={draft.analysis || "-"}>
-                                    {truncateText(draft.analysis, 60)}
-                                  </td>
-                                  <td title={draft.lawSource || "-"}>
-                                    {truncateText(draft.lawSource, 40)}
-                                  </td>
-                                  <td
-                                    title={
-                                      draft.sourceLabel ||
-                                      draft.sourceRowNumbers.join(", ") ||
-                                      "-"
-                                    }
-                                  >
-                                    {draft.sourceLabel ||
-                                      draft.sourceRowNumbers.join(", ") ||
-                                      "-"}
-                                  </td>
-                                  <td>
-                                    {batch.status === "READY" ? (
-                                      <Button
-                                        danger
-                                        size="small"
-                                        disabled={isMutating}
-                                        onClick={() =>
-                                          void handleDeleteDraft(draft.id)
-                                        }
-                                      >
-                                        删除
-                                      </Button>
-                                    ) : (
-                                      "-"
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <Pagination
-                          size="small"
-                          current={draftPage}
-                          pageSize={draftPageSize}
-                          total={batch.draftTotal}
-                          pageSizeOptions={draftPageSizeOptions.map(String)}
-                          showSizeChanger
-                          onChange={(page, pageSize) =>
-                            void handleDraftPaginationChange(page, pageSize)
-                          }
-                        />
-                      </>
-                    ) : (
-                      <div className="admin-empty-state">
-                        当前批次没有可确认的题目草稿。
-                      </div>
-                    )}
-                  </div>
-                ),
-              },
-              {
-                key: "rows",
-                label: `来源行判定（${batch?.sourceRowTotal ?? 0}）`,
-                children: batch?.sourceRowTotal ? (
-                  <div className="list-grid">
-                    <div className="admin-table-wrap">
-                      <table className="admin-table is-import-detail-table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: 88 }}>行号</th>
-                            <th style={{ width: 120 }}>状态</th>
-                            <th style={{ width: 132 }}>命中题号</th>
-                            <th style={{ width: "38%" }}>原始内容</th>
-                            <th style={{ width: "30%" }}>原因说明</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {pagedSourceRows?.map((row) => (
-                            <tr key={row.id}>
-                              <td>{row.rowNumber}</td>
-                              <td>{getImportSourceStatusLabel(row.status)}</td>
-                              <td>
-                                {row.matchedSortOrders.length > 0
-                                  ? row.matchedSortOrders.join(", ")
-                                  : "-"}
-                              </td>
-                              <td title={row.content}>
-                                {truncateText(row.content, 120)}
-                              </td>
-                              <td title={row.reason || "-"}>
-                                {truncateText(row.reason, 80)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <Pagination
-                      size="small"
-                      current={sourceRowPage}
-                      pageSize={sourceRowPageSize}
-                      total={batch.sourceRowTotal}
-                      pageSizeOptions={sourceRowPageSizeOptions.map(String)}
-                      showSizeChanger
-                      onChange={(page, pageSize) =>
-                        void handleSourceRowPaginationChange(page, pageSize)
-                      }
-                    />
-                  </div>
-                ) : (
-                  <div className="admin-empty-state">
-                    当前批次还没有来源行记录。
-                  </div>
-                ),
-              },
-            ]}
-          />
-        ) : null}
-
-        {batch?.status === "FAILED" ? (
-          <div style={{ color: "var(--danger)" }}>
-            {batch.lastError || "导题解析失败，请检查文件内容或模型配置。"}
-          </div>
-        ) : null}
-
-        {errorMessage ? (
-          <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
-        ) : null}
-
-        {successMessage ? (
-          <div style={{ color: "var(--success)" }}>{successMessage}</div>
-        ) : null}
       </div>
     </Modal>
   );

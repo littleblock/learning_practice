@@ -35,7 +35,7 @@ export function RouteLoading({
         <p>{description}</p>
         <div className="route-loading-tip">
           <strong>系统正在同步最新内容</strong>
-          <span>页面不是卡住，加载完成后会自动显示结果。</span>
+          <span>当前页面不是卡住了，加载完成后会自动显示结果。</span>
         </div>
       </div>
       <div className="route-loading-skeletons">

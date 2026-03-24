@@ -1,0 +1,21 @@
+<svg width="720" height="520" viewBox="0 0 720 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="520" rx="36" fill="#F7FBFF"/>
+  <circle cx="144" cy="126" r="68" fill="#FFE0B8"/>
+  <circle cx="592" cy="114" r="54" fill="#D6E7FF"/>
+  <path d="M132 370C132 333.549 161.549 304 198 304H522C558.451 304 588 333.549 588 370V390C588 426.451 558.451 456 522 456H198C161.549 456 132 426.451 132 390V370Z" fill="#E7F1FF"/>
+  <rect x="186" y="138" width="348" height="222" rx="28" fill="white" stroke="#BFD7F6" stroke-width="8"/>
+  <rect x="220" y="174" width="138" height="22" rx="11" fill="#DCEAFF"/>
+  <rect x="220" y="214" width="278" height="18" rx="9" fill="#EEF5FF"/>
+  <rect x="220" y="246" width="248" height="18" rx="9" fill="#EEF5FF"/>
+  <rect x="220" y="288" width="102" height="32" rx="16" fill="#0B57D0"/>
+  <rect x="336" y="288" width="124" height="32" rx="16" fill="#DCEAFF"/>
+  <path d="M518 232C518 198.863 544.863 172 578 172H590C623.137 172 650 198.863 650 232V244C650 277.137 623.137 304 590 304H578C544.863 304 518 277.137 518 244V232Z" fill="#0B57D0"/>
+  <path d="M555 220H612V228H555V220Z" fill="white"/>
+  <path d="M555 240H626V248H555V240Z" fill="white" fill-opacity="0.9"/>
+  <path d="M555 260H600V268H555V260Z" fill="white" fill-opacity="0.85"/>
+  <path d="M94 214C94 184.729 117.729 161 147 161H171C200.271 161 224 184.729 224 214V230C224 259.271 200.271 283 171 283H147C117.729 283 94 259.271 94 230V214Z" fill="#FF7B45"/>
+  <path d="M130 208C130 203.582 133.582 200 138 200H179C183.418 200 187 203.582 187 208V208C187 212.418 183.418 216 179 216H138C133.582 216 130 212.418 130 208V208Z" fill="white"/>
+  <path d="M130 232C130 227.582 133.582 224 138 224H168C172.418 224 176 227.582 176 232V232C176 236.418 172.418 240 168 240H138C133.582 240 130 236.418 130 232V232Z" fill="white" fill-opacity="0.9"/>
+  <circle cx="386" cy="118" r="42" fill="#0B57D0"/>
+  <path d="M371 118L381 128L404 104" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -60,18 +60,11 @@ export function BankForm({
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(
-            mode === "create"
-              ? {
-                  name,
-                  description,
-                }
-              : {
-                  name,
-                  description,
-                  sortOrder,
-                },
-          ),
+          body: JSON.stringify({
+            name,
+            description,
+            sortOrder,
+          }),
         },
       );
 
@@ -121,7 +114,7 @@ export function BankForm({
       <Input
         placeholder={
           mode === "create"
-            ? "系统将自动生成题库编码，例如 TK-202603-00000001"
+            ? "系统会在提交后自动生成题库编码"
             : "题库编码"
         }
         value={code}
@@ -138,14 +131,19 @@ export function BankForm({
         rows={3}
         onChange={(event) => setDescription(event.target.value)}
       />
-      {mode === "edit" ? (
+      <div style={{ display: "grid", gap: 6 }}>
         <Input
           type="number"
-          placeholder="排序值"
+          min={0}
+          max={9999}
+          placeholder="前端展示排序，数字越小越靠前"
           value={String(sortOrder)}
           onChange={(event) => setSortOrder(Number(event.target.value || 0))}
         />
-      ) : null}
+        <div className="page-note" style={{ fontSize: 13, margin: 0 }}>
+          前端题库列表会按排序值从小到大展示；相同排序值时再按创建时间倒序展示。
+        </div>
+      </div>
       {errorMessage ? (
         <div style={{ color: "var(--danger)" }}>{errorMessage}</div>
       ) : null}

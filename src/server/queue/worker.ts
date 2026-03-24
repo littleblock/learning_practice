@@ -5,6 +5,7 @@ import { captureServerException } from "@/server/monitoring/sentry";
 import {
   claimNextPendingJob,
   jobLockHeartbeatIntervalMs,
+  markJobCancelled,
   markJobCompleted,
   recoverStaleProcessingJobs,
   releaseJobFailure,
@@ -21,7 +22,10 @@ import {
   rebuildMatchesForBank,
   processStatuteDocument,
 } from "@/server/services/statute-service";
-import { markQuestionImportBatchFailed } from "@/server/services/question-import-service";
+import {
+  isImportBatchCancelledError,
+  markQuestionImportBatchFailed,
+} from "@/server/services/question-import-service";
 
 async function processJob(workerId: string) {
   const recoveredJobs = await recoverStaleProcessingJobs();
@@ -75,6 +79,18 @@ async function processJob(workerId: string) {
     await markJobCompleted(job.id);
     logger.info({ jobId: job.id, jobType: job.type }, "Job completed");
   } catch (error) {
+    if (isImportBatchCancelledError(error)) {
+      logger.warn(
+        { error, jobId: job.id, jobType: job.type },
+        "Job cancelled",
+      );
+      await markJobCancelled(
+        job.id,
+        error instanceof Error ? error.message : "任务已取消",
+      );
+      return true;
+    }
+
     logger.error({ error, jobId: job.id, jobType: job.type }, "Job failed");
     captureServerException(error, {
       jobId: job.id,

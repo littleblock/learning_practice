@@ -30,6 +30,7 @@ export const createBankSchema = z.object({
   code: bankCodeSchema.optional(),
   name: z.string().trim().min(2, "题库名称至少 2 位").max(100, "题库名称过长"),
   description: z.string().trim().max(500, "题库简介过长").optional(),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
 });
 
 export const updateBankSchema = z.object({

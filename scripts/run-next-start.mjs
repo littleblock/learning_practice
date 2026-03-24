@@ -23,15 +23,14 @@ printAppUrls();
 const packageManagerExecPath = process.env.npm_execpath;
 
 if (!packageManagerExecPath) {
-  throw new Error("Package manager entrypoint not found; cannot start Next dev.");
+  throw new Error("Package manager entrypoint not found; cannot start Next server.");
 }
 
-const child = spawn(process.execPath, [packageManagerExecPath, "exec", "next", "dev"], {
+const child = spawn(process.execPath, [packageManagerExecPath, "exec", "next", "start"], {
   cwd: process.cwd(),
   stdio: "inherit",
   env: {
     ...process.env,
-    NEXT_DIST_DIR: ".next-dev",
   },
 });
 

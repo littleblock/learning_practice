@@ -29,7 +29,7 @@ export function BankListTable({ banks }: BankListTableProps) {
             <th style={{ width: "34%" }}>题库名称</th>
             <th style={{ width: 176 }}>编码</th>
             <th style={{ width: 108 }}>状态</th>
-            <th style={{ width: 84 }}>排序</th>
+            <th style={{ width: 92 }}>前端排序</th>
             <th style={{ width: 96 }}>题目数</th>
             <th style={{ width: 96 }}>资料数</th>
             <th style={{ width: 260 }}>操作</th>

@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 import Link from "next/link";
 
+import { MobileBankEntryActions } from "@/features/mobile/components/mobile-bank-entry-actions";
 import { requirePageRole } from "@/server/auth/guards";
 import { listMobileBankSummaries } from "@/server/services/bank-service";
 
@@ -22,8 +23,7 @@ export default async function MobileBanksPage() {
       <section className="mobile-page-header">
         <h1>题库列表</h1>
         <p>
-          你好，{session.user.displayName}
-          。可以从这里开始新的练习，也可以继续上次进度。
+          你好，{session.user.displayName}。可以从这里开始新的练习，也可以继续上次进度。
         </p>
       </section>
 
@@ -104,24 +104,11 @@ export default async function MobileBanksPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: 16 }} className="inline-actions">
-              <Link
-                href={`/m/banks/${bank.id}/setup`}
-                className="mobile-button is-primary"
-                prefetch={false}
-              >
-                进入题库
-              </Link>
-              {bank.resumeSessionId ? (
-                <Link
-                  href={`/m/practice/${bank.resumeSessionId}`}
-                  className="mobile-button"
-                  prefetch={false}
-                >
-                  继续上次练习
-                </Link>
-              ) : null}
-            </div>
+            <MobileBankEntryActions
+              bankId={bank.id}
+              bankName={bank.name}
+              resumeSessionId={bank.resumeSessionId}
+            />
           </section>
         ))}
       </div>

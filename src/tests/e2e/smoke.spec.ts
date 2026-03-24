@@ -65,11 +65,11 @@ test.describe("admin and mobile smoke flows", () => {
   test("learner login and practice flow are reachable", async ({ page }) => {
     await page.goto("/m/login");
 
-    await setInputValue(page, 'input[autocomplete="username"]', "syy");
+    await setInputValue(page, 'input[autocomplete="username"]', "test01");
     await setInputValue(
       page,
       'input[autocomplete="current-password"]',
-      "study@123",
+      "123456",
     );
     await page.locator('button[type="submit"]').click();
 

@@ -19,7 +19,7 @@ export default async function AdminBankCreatePage() {
           </div>
           <h1>新增题库</h1>
           <p>
-            提交后系统会自动生成题库编码，创建完成后可继续维护题目和法条资料。
+            提交后系统会自动生成题库编码，并可直接设置前端展示顺序，创建完成后即可继续维护题目和资料。
           </p>
         </div>
 
@@ -33,8 +33,8 @@ export default async function AdminBankCreatePage() {
             <strong>题库名称</strong>
           </div>
           <div className="admin-summary-card">
-            <span>下一步</span>
-            <strong>进入题目管理或法条资料页</strong>
+            <span>排序规则</span>
+            <strong>数字越小，前端越靠前</strong>
           </div>
         </div>
 

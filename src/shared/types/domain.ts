@@ -142,6 +142,7 @@ export interface QuestionImportBatchDetail {
   createdAt: string;
   parsedAt: string | null;
   confirmedAt: string | null;
+  cancelledAt: string | null;
   drafts: QuestionImportDraftItem[];
   sourceRowTotal: number;
   sourceRows: QuestionImportSourceRowItem[];
@@ -165,6 +166,7 @@ export interface QuestionImportBatchSummary {
   createdAt: string;
   parsedAt: string | null;
   confirmedAt: string | null;
+  cancelledAt: string | null;
 }
 
 export interface StatuteDocumentListItem {

@@ -28,16 +28,17 @@ function parseQuestionOptions(value: Prisma.JsonValue) {
 }
 
 function parseCorrectAnswers(value: Prisma.JsonValue) {
-  const parsed = z.array(z.string()).parse(value);
-  return parsed;
+  return z.array(z.string()).parse(value);
 }
 
 function shuffle<T>(items: T[]) {
   const cloned = [...items];
+
   for (let index = cloned.length - 1; index > 0; index -= 1) {
     const randomIndex = Math.floor(Math.random() * (index + 1));
     [cloned[index], cloned[randomIndex]] = [cloned[randomIndex], cloned[index]];
   }
+
   return cloned;
 }
 
@@ -109,6 +110,106 @@ function buildPracticeSessionView(
     submittedCount: session.submittedCount,
     currentQuestion,
   };
+}
+
+interface AttemptHistoryItem {
+  isCorrect: boolean;
+  submittedAt: Date;
+}
+
+/**
+ * 功能说明：
+ * 根据题目的最终作答记录重算用户题目统计，确保同一会话内改答不会重复累计。
+ *
+ * 业务背景：
+ * 学员支持返回上一题修改答案后，统计口径必须以每个会话题目的最终结果为准，避免错题本和正确率被中间态污染。
+ *
+ * 核心逻辑：
+ * 读取该用户在当前题目上的全部历史作答记录，按最终提交顺序重放错题本恢复规则，并同步覆盖统计快照。
+ *
+ * 关键约束：
+ * 同一会话题目只保留一条最终作答记录；若历史记录为空则删除统计快照，避免残留脏数据。
+ */
+function summarizeAttemptHistory(attempts: AttemptHistoryItem[]) {
+  let correctAttempts = 0;
+  let wrongBookState = {
+    isInWrongBook: false,
+    consecutiveCorrectInWrongBook: 0,
+  };
+
+  for (const attempt of attempts) {
+    if (attempt.isCorrect) {
+      correctAttempts += 1;
+    }
+
+    wrongBookState = resolveWrongBookState(
+      wrongBookState,
+      attempt.isCorrect,
+      WRONG_BOOK_RECOVERY_COUNT,
+    );
+  }
+
+  const latestAttempt = attempts.at(-1) ?? null;
+
+  return {
+    totalAttempts: attempts.length,
+    correctAttempts,
+    consecutiveCorrectInWrongBook:
+      wrongBookState.consecutiveCorrectInWrongBook,
+    isInWrongBook: wrongBookState.isInWrongBook,
+    lastResultCorrect: latestAttempt?.isCorrect ?? null,
+    lastAnsweredAt: latestAttempt?.submittedAt ?? null,
+  };
+}
+
+async function syncUserQuestionStat(
+  transaction: Prisma.TransactionClient,
+  userId: string,
+  bankId: string,
+  questionId: string,
+) {
+  const attempts = await transaction.practiceAttempt.findMany({
+    where: {
+      userId,
+      bankId,
+      questionId,
+    },
+    orderBy: [{ submittedAt: "asc" }, { id: "asc" }],
+    select: {
+      isCorrect: true,
+      submittedAt: true,
+    },
+  });
+
+  if (attempts.length === 0) {
+    await transaction.userQuestionStat.deleteMany({
+      where: {
+        userId,
+        bankId,
+        questionId,
+      },
+    });
+    return;
+  }
+
+  const summary = summarizeAttemptHistory(attempts);
+
+  await transaction.userQuestionStat.upsert({
+    where: {
+      userId_bankId_questionId: {
+        userId,
+        bankId,
+        questionId,
+      },
+    },
+    update: summary,
+    create: {
+      userId,
+      bankId,
+      questionId,
+      ...summary,
+    },
+  });
 }
 
 async function getQuestionIdsForPractice(
@@ -242,18 +343,18 @@ export async function getPracticeSessionView(
 }
 
 /**
-功能说明：
-提交当前题目的答案，并同步刷新练习会话与错题本状态。
-
-业务背景：
-学员在练习中提交答案后，系统需要一次性完成答题记录落库、题目统计更新和会话推进。
-
-核心逻辑：
-以事务包裹答题记录、用户题目统计和练习会话更新，保证一次提交后的学习状态保持一致。
-
-关键约束：
-同一道题只接受首次提交；错题本移出规则依赖连续答对次数；最后一题提交后会直接完成会话。
-*/
+ * 功能说明：
+ * 提交当前题目的最终答案，并同步覆盖该题在当前会话中的保存结果。
+ *
+ * 业务背景：
+ * 学员在移动端支持返回上一题修改答案，系统需要保证同一会话题目的最终结果可以被更新，同时不重复累计做题统计。
+ *
+ * 核心逻辑：
+ * 使用会话题目唯一键对作答记录执行 upsert，再基于全部最终作答记录重算用户题目统计，并刷新当前会话的已提交数量。
+ *
+ * 关键约束：
+ * 同一会话题目只保留一条最终答案；最后一题提交后仍保持会话进行中，只有显式继续下一步时才会完成整场练习。
+ */
 export async function submitCurrentAnswer(
   userId: string,
   sessionId: string,
@@ -271,11 +372,6 @@ export async function submitCurrentAnswer(
     throw new Error("当前会话没有待答题目");
   }
 
-  const existingAttempt = currentItem.attempts[0];
-  if (existingAttempt) {
-    return buildPracticeSessionView(session);
-  }
-
   const selectedAnswers = normalizeAnswerValues(payload.selectedAnswers);
   const correctAnswers = parseCorrectAnswers(
     currentItem.question.correctAnswers,
@@ -285,11 +381,20 @@ export async function submitCurrentAnswer(
     selectedAnswers,
     correctAnswers,
   );
-  const isLastQuestion = session.currentIndex >= session.totalCount - 1;
+  const hasExistingAttempt = Boolean(currentItem.attempts[0]);
+  const answeredAt = new Date();
 
   await prisma.$transaction(async (transaction) => {
-    await transaction.practiceAttempt.create({
-      data: {
+    await transaction.practiceAttempt.upsert({
+      where: {
+        sessionItemId: currentItem.id,
+      },
+      update: {
+        selectedAnswers,
+        isCorrect,
+        submittedAt: answeredAt,
+      },
+      create: {
         sessionId: session.id,
         sessionItemId: currentItem.id,
         userId,
@@ -297,79 +402,32 @@ export async function submitCurrentAnswer(
         questionId: currentItem.question.id,
         selectedAnswers,
         isCorrect,
+        submittedAt: answeredAt,
       },
     });
 
-    const currentStat = await transaction.userQuestionStat.findUnique({
-      where: {
-        userId_bankId_questionId: {
-          userId,
-          bankId: session.bankId,
-          questionId: currentItem.question.id,
-        },
-      },
-    });
-
-    if (currentStat) {
-      const nextWrongBookState = resolveWrongBookState(
-        {
-          isInWrongBook: currentStat.isInWrongBook,
-          consecutiveCorrectInWrongBook:
-            currentStat.consecutiveCorrectInWrongBook,
-        },
-        isCorrect,
-        WRONG_BOOK_RECOVERY_COUNT,
-      );
-
-      await transaction.userQuestionStat.update({
-        where: {
-          id: currentStat.id,
-        },
-        data: {
-          totalAttempts: {
-            increment: 1,
-          },
-          correctAttempts: isCorrect
-            ? {
-                increment: 1,
-              }
-            : undefined,
-          consecutiveCorrectInWrongBook:
-            nextWrongBookState.consecutiveCorrectInWrongBook,
-          isInWrongBook: nextWrongBookState.isInWrongBook,
-          lastResultCorrect: isCorrect,
-          lastAnsweredAt: new Date(),
-        },
-      });
-    } else {
-      await transaction.userQuestionStat.create({
-        data: {
-          userId,
-          bankId: session.bankId,
-          questionId: currentItem.question.id,
-          totalAttempts: 1,
-          correctAttempts: isCorrect ? 1 : 0,
-          consecutiveCorrectInWrongBook: 0,
-          isInWrongBook: !isCorrect,
-          lastResultCorrect: isCorrect,
-          lastAnsweredAt: new Date(),
-        },
-      });
-    }
+    await syncUserQuestionStat(
+      transaction,
+      userId,
+      session.bankId,
+      currentItem.question.id,
+    );
 
     await transaction.practiceSession.update({
       where: {
         id: session.id,
       },
       data: {
-        submittedCount: {
-          increment: 1,
-        },
-        status: isLastQuestion
-          ? PracticeSessionStatus.COMPLETED
-          : PracticeSessionStatus.IN_PROGRESS,
-        completedAt: isLastQuestion ? new Date() : null,
-        lastAccessedAt: new Date(),
+        ...(hasExistingAttempt
+          ? {}
+          : {
+              submittedCount: {
+                increment: 1,
+              },
+            }),
+        status: PracticeSessionStatus.IN_PROGRESS,
+        completedAt: null,
+        lastAccessedAt: answeredAt,
       },
     });
   });
@@ -394,23 +452,51 @@ export async function moveToNextQuestion(userId: string, sessionId: string) {
   }
 
   if (session.currentIndex >= session.totalCount - 1) {
+    const completedAt = new Date();
     await prisma.practiceSession.update({
       where: { id: session.id },
       data: {
         currentIndex: session.totalCount,
         status: PracticeSessionStatus.COMPLETED,
-        completedAt: new Date(),
+        completedAt,
+        lastAccessedAt: completedAt,
       },
     });
 
     return getPracticeSessionView(userId, sessionId);
   }
 
+  const accessedAt = new Date();
   await prisma.practiceSession.update({
     where: { id: session.id },
     data: {
       currentIndex: {
         increment: 1,
+      },
+      lastAccessedAt: accessedAt,
+      completedAt: null,
+    },
+  });
+
+  return getPracticeSessionView(userId, sessionId);
+}
+
+export async function moveToPreviousQuestion(userId: string, sessionId: string) {
+  const session = await getSessionWithCurrentQuestion(sessionId, userId);
+
+  if (!session) {
+    throw new Error("练习会话不存在");
+  }
+
+  if (!session.currentItem || session.currentIndex <= 0) {
+    return buildPracticeSessionView(session);
+  }
+
+  await prisma.practiceSession.update({
+    where: { id: session.id },
+    data: {
+      currentIndex: {
+        decrement: 1,
       },
       lastAccessedAt: new Date(),
     },

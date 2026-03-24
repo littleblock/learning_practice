@@ -25,7 +25,7 @@ export default async function AdminBanksPage({
         <div className="admin-section-header">
           <div className="admin-page-header-copy">
             <h1>题库管理</h1>
-            <p>集中维护题库入口、启用状态、题目与资料规模。</p>
+            <p>集中维护题库入口、前端展示顺序、启用状态、题目规模和资料规模。</p>
           </div>
           <Link href="/admin/banks/new" className="admin-primary-link">
             新增题库
@@ -52,7 +52,7 @@ export default async function AdminBanksPage({
         <div className="admin-section-header is-compact">
           <div>
             <h2>题库列表</h2>
-            <p className="page-note">支持按名称、编码和状态快速筛选。</p>
+            <p className="page-note">支持按名称、编码和状态筛选，并查看前端展示排序值。</p>
           </div>
         </div>
 

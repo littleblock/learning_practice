@@ -71,6 +71,8 @@ function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
     case "PENDING":
     case "PROCESSING":
       return "查看进度";
+    case "CANCELLED":
+      return "查看终止";
     case "FAILED":
       return "查看失败";
     case "CONFIRMED":
@@ -78,6 +80,10 @@ function getBatchActionLabel(status: QuestionImportBatchSummary["status"]) {
     default:
       return "查看";
   }
+}
+
+function isBatchCancelable(status: QuestionImportBatchSummary["status"]) {
+  return ["PENDING", "PROCESSING", "READY"].includes(status);
 }
 
 function getBatchProgressPercent(batch: QuestionImportBatchSummary) {
@@ -88,20 +94,36 @@ function getBatchProgressPercent(batch: QuestionImportBatchSummary) {
     );
   }
 
-  if (batch.status === "READY" || batch.status === "CONFIRMED") {
+  if (
+    batch.status === "READY" ||
+    batch.status === "CONFIRMED" ||
+    batch.status === "CANCELLED"
+  ) {
     return 100;
   }
 
   return 0;
 }
 
-function getBatchProgressSummary(batch: QuestionImportBatchSummary) {
+function getBatchProgressSummary(batch: {
+  totalSourceRows: number;
+  processedSourceRows: number;
+  status: string;
+}) {
   if (batch.totalSourceRows > 0) {
     return `${batch.processedSourceRows}/${batch.totalSourceRows} 行`;
   }
 
   if (batch.status === "READY" || batch.status === "CONFIRMED") {
     return "已完成";
+  }
+
+  if (batch.status === "CANCELLED") {
+    return "已终止";
+  }
+
+  if (batch.status === "CANCELLED") {
+    return "批次已终止";
   }
 
   if (batch.status === "FAILED") {
@@ -111,7 +133,11 @@ function getBatchProgressSummary(batch: QuestionImportBatchSummary) {
   return "等待开始";
 }
 
-function getBatchProgressDetail(batch: QuestionImportBatchSummary) {
+function getBatchProgressDetail(batch: {
+  totalChunks: number;
+  processedChunks: number;
+  status: string;
+}) {
   if (batch.totalChunks > 0) {
     return `已完成 ${batch.processedChunks}/${batch.totalChunks} 个分块`;
   }
@@ -127,7 +153,11 @@ function getBatchProgressDetail(batch: QuestionImportBatchSummary) {
   return "尚未生成分块";
 }
 
-function getBatchParseDuration(batch: QuestionImportBatchSummary) {
+function getBatchParseDuration(batch: {
+  parsedAt: string | null;
+  createdAt: string;
+  status: string;
+}) {
   if (batch.parsedAt) {
     return formatDurationBetween(batch.createdAt, batch.parsedAt);
   }
@@ -138,6 +168,10 @@ function getBatchParseDuration(batch: QuestionImportBatchSummary) {
 
   if (batch.status === "PENDING") {
     return "等待解析";
+  }
+
+  if (batch.status === "CANCELLED") {
+    return "已终止";
   }
 
   return "-";
@@ -187,6 +221,7 @@ export function QuestionManager({
   const [importOpen, setImportOpen] = useState(false);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [cancelingBatchId, setCancelingBatchId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [questionColumnWidths, setQuestionColumnWidths] = useState(
     defaultQuestionColumnWidths,
@@ -281,6 +316,38 @@ export function QuestionManager({
       setDeleteError("删除题目失败");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function cancelBatch(batchId: string) {
+    if (!window.confirm("终止后当前导题批次会被作废，已生成草稿不会继续导入，确认终止吗？")) {
+      return;
+    }
+
+    setCancelingBatchId(batchId);
+    setDeleteError(null);
+
+    try {
+      const response = await fetch(
+        withAppBasePath(`/api/admin/questions/import/${batchId}/cancel`),
+        {
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        setDeleteError(payload.message ?? "终止导题批次失败");
+        return;
+      }
+
+      refreshCurrentPage();
+    } catch {
+      setDeleteError("终止导题批次失败");
+    } finally {
+      setCancelingBatchId(null);
     }
   }
 
@@ -629,19 +696,42 @@ export function QuestionManager({
                                   </td>
                                   <td className="admin-table-actions-cell">
                                     <div className="admin-table-action-links">
-                                      <button
-                                        type="button"
-                                        className="admin-table-inline-button"
-                                        onClick={() => openImport(batch.id)}
-                                        disabled={
-                                          isRefreshing || isSwitchingTab
-                                        }
-                                      >
-                                        {getBatchActionLabel(batch.status)}
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
+                                    <button
+                                      type="button"
+                                      className="admin-table-inline-button"
+                                      onClick={() => openImport(batch.id)}
+                                      disabled={
+                                        isRefreshing || isSwitchingTab
+                                      }
+                                    >
+                                      {getBatchActionLabel(batch.status)}
+                                    </button>
+                                    {isBatchCancelable(batch.status) ? (
+                                      <>
+                                        <span className="admin-table-action-divider">
+                                          /
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="admin-table-inline-button is-danger"
+                                          onClick={() =>
+                                            void cancelBatch(batch.id)
+                                          }
+                                          disabled={
+                                            cancelingBatchId === batch.id ||
+                                            isRefreshing ||
+                                            isSwitchingTab
+                                          }
+                                        >
+                                          {cancelingBatchId === batch.id
+                                            ? "终止中..."
+                                            : "终止导入"}
+                                        </button>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
                               );
                             })}
                           </tbody>

@@ -92,6 +92,19 @@ export async function markJobCompleted(jobId: string) {
   });
 }
 
+export async function markJobCancelled(jobId: string, error?: string) {
+  return prisma.job.update({
+    where: { id: jobId },
+    data: {
+      status: JobStatus.CANCELLED,
+      finishedAt: new Date(),
+      lockedAt: null,
+      lockedBy: null,
+      lastError: error?.slice(0, 4000) ?? "任务已取消",
+    },
+  });
+}
+
 export async function releaseJobFailure(
   job: Pick<Job, "id" | "attempts" | "maxAttempts">,
   error: string,

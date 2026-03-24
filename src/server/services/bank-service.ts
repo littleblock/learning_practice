@@ -333,6 +333,7 @@ export async function createBank(input: CreateBankInput) {
               code,
               name: payload.name,
               description: payload.description?.trim() || null,
+              sortOrder: payload.sortOrder,
               status: BankStatus.ACTIVE,
             },
           });
